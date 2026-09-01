@@ -6,12 +6,12 @@ import { expect, it } from "vitest";
 import { GATEWAY_SERVER_CAPS } from "../../../packages/gateway-protocol/src/index.js";
 import { SANDBOX_HOST_PATH } from "../../../src/agents/sandbox-host.js";
 import { createSandboxHostHttpServer } from "../../../src/gateway/mcp-app-sandbox-http.js";
-import { workboardUi } from "../pages/workboard/workboard.e2e.test-support.ts";
 import {
   controlUiBundledSettingsStorageKey,
   controlUiSessionUrl,
   installMockGateway,
 } from "../test-helpers/control-ui-e2e.ts";
+import { workboardUi } from "../test-helpers/control-ui-workboard-fixture.ts";
 import {
   dockChatSidePanel,
   focusChatSidePanel,
