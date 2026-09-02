@@ -9997,6 +9997,17 @@ printf '%s\n' "\${CURL_SUCCESS_IP:-203.0.113.7}"
       "Build CI manifest Node source",
     );
     const repoRoot = process.cwd();
+    const nativePlan = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        "const { createNodeTestShardBundles } = await import('./scripts/lib/ci-node-test-plan.mts'); console.log(createNodeTestShardBundles().length);",
+      ],
+      { cwd: repoRoot, encoding: "utf8", env: { ...process.env, NODE_OPTIONS: "" } },
+    );
+    expect(nativePlan.status, `${nativePlan.stdout}${nativePlan.stderr}`).toBe(0);
+    expect(Number(nativePlan.stdout.trim())).toBeGreaterThan(0);
     const pending = new Set<string>();
 
     function inspectImports(file: string, source: string, workflow = false) {

@@ -132,7 +132,7 @@ const PLUGIN_NPM_GENERATION_KEY_DIR_NAME_PATTERN = new RegExp(
 );
 
 /** Resolves the managed npm artifact-generation project directory prefix for a package. */
-export function resolvePluginNpmGenerationProjectDirPrefix(packageName: string): string {
+function resolvePluginNpmGenerationProjectDirPrefix(packageName: string): string {
   return `${encodePluginNpmProjectDirName(packageName)}${PLUGIN_NPM_GENERATION_PROJECT_SEPARATOR}`;
 }
 

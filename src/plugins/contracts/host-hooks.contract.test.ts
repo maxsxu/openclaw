@@ -25,6 +25,7 @@ import { buildGatewaySessionRow } from "../../gateway/session-utils.js";
 import { withTempConfig } from "../../gateway/test-temp-config.js";
 import { emitAgentEvent, resetAgentEventsForTest } from "../../infra/agent-events.js";
 import { resolvePreferredOpenClawTmpDir } from "../../infra/tmp-openclaw-dir.js";
+import { createDeferredCore } from "../../shared/deferred.js";
 import { withEnvAsync } from "../../test-utils/env.js";
 import type {
   AgentToolResultMiddlewareContext,
@@ -33,12 +34,8 @@ import type {
 import { registerPluginCommandInRegistry } from "../command-registration.js";
 import { executePluginCommand } from "../commands.js";
 import { createHookRunner } from "../hooks.js";
-import { cleanupReplacedPluginHostRegistry, runPluginHostCleanup } from "../host-hook-cleanup.js";
-import {
-  clearPluginHostRuntimeState,
-  getPluginRunContext,
-  setPluginRunContext,
-} from "../host-hook-runtime.js";
+import { createPluginHostRegistryRetirement, runPluginHostCleanup } from "../host-hook-cleanup.js";
+import { getPluginRunContext, setPluginRunContext } from "../host-hook-runtime.js";
 import { listPluginSessionSchedulerJobs } from "../host-hook-runtime.test-fixtures.js";
 import {
   drainPluginNextTurnInjectionContext,
@@ -50,7 +47,11 @@ import {
 import { buildPluginAgentTurnPrepareContext, isPluginJsonValue } from "../host-hooks.js";
 import { createEmptyPluginRegistry } from "../registry-empty.js";
 import { createPluginRegistry } from "../registry.js";
-import { setActivePluginRegistry } from "../runtime.js";
+import {
+  clearActivePluginRegistry,
+  setActivePluginRegistry,
+  stageActivePluginRegistry,
+} from "../runtime.js";
 import type { PluginRuntime } from "../runtime/types.js";
 import { createPluginRecord } from "../status.test-helpers.js";
 import {
@@ -170,10 +171,12 @@ async function withHostHookState(
 }
 
 describe("host-hook fixture plugin contract", () => {
-  afterEach(() => {
-    setActivePluginRegistry(createEmptyPluginRegistry());
-    clearPluginHostRuntimeState();
-    resetAgentEventsForTest();
+  afterEach(async () => {
+    try {
+      await clearActivePluginRegistry();
+    } finally {
+      resetAgentEventsForTest();
+    }
   });
 
   it("registers generic SDK seams without Plan Mode business logic", () => {
@@ -2254,6 +2257,12 @@ describe("host-hook fixture plugin contract", () => {
       'pluginHostHookHandlers["plugins.uiDescriptors"] test invariant',
     )({
       params: {},
+      context: {
+        getRuntimeConfig: () => config,
+        getGatewayMethodRegistry: () => ({
+          listAdvertisedMethods: () => ["plugins.uiDescriptors"],
+        }),
+      },
       respond: (ok: boolean, payload: unknown, error: unknown) => {
         calls.push([ok, payload, error]);
       },
@@ -2266,6 +2275,11 @@ describe("host-hook fixture plugin contract", () => {
     expect(validatePluginsUiDescriptorsResult(payload)).toBe(true);
     expect(payload).toEqual({
       ok: true,
+      generation: expect.any(Number),
+      methods: ["plugins.uiDescriptors"],
+      controlUiTabs: [],
+      controlUiWidgetKinds: [],
+      pluginSurfaceUrls: {},
       descriptors: [
         {
           id: "approval-panel",
@@ -2728,6 +2742,7 @@ describe("host-hook fixture plugin contract", () => {
         });
       },
     });
+    setActivePluginRegistry(registry.registry);
 
     const entry: SessionEntry = {
       sessionId: "session-1",
@@ -2781,11 +2796,13 @@ describe("host-hook fixture plugin contract", () => {
         reason: "reset",
         sessionKey: "agent:main:main",
       });
-      await cleanupReplacedPluginHostRegistry({
+      const next = createEmptyPluginRegistry();
+      stageActivePluginRegistry(next, null, "default");
+      await createPluginHostRegistryRetirement({
         cfg: tempConfig,
         previousRegistry: registry.registry,
-        nextRegistry: createEmptyPluginRegistry(),
-      });
+        nextRegistry: next,
+      })();
     });
 
     expect(cleanupEvents).toEqual([
@@ -2799,6 +2816,9 @@ describe("host-hook fixture plugin contract", () => {
   });
 
   it("keeps scheduler job records when cleanup fails so cleanup can retry", async () => {
+    const cleanup = vi.fn<() => void>().mockImplementationOnce(() => {
+      throw new Error("cleanup failed");
+    });
     const { config, registry } = createPluginRegistryFixture();
     registerTestPlugin({
       registry,
@@ -2812,12 +2832,11 @@ describe("host-hook fixture plugin contract", () => {
           id: "retryable-job",
           sessionKey: "agent:main:main",
           kind: "monitor",
-          cleanup: () => {
-            throw new Error("cleanup failed");
-          },
+          cleanup,
         });
       },
     });
+    setActivePluginRegistry(registry.registry);
 
     const cleanupResult = await runPluginHostCleanup({
       cfg: config,
@@ -2838,6 +2857,16 @@ describe("host-hook fixture plugin contract", () => {
         kind: "monitor",
       },
     ]);
+    await expect(
+      runPluginHostCleanup({
+        cfg: config,
+        registry: registry.registry,
+        pluginId: "cleanup-failure-fixture",
+        reason: "disable",
+      }),
+    ).resolves.toEqual({ cleanupCount: 0, failures: [] });
+    expect(cleanup).toHaveBeenCalledTimes(2);
+    expect(listPluginSessionSchedulerJobs("cleanup-failure-fixture")).toEqual([]);
   });
 
   it("preserves restarted scheduler jobs while cleaning the replaced registry", async () => {
@@ -2888,28 +2917,14 @@ describe("host-hook fixture plugin contract", () => {
         rootDir: "/virtual/restart-fixture",
       },
     ];
-    const { config, registry } = createPluginRegistryFixture();
-    registerTestPlugin({
-      registry,
-      config,
-      record: createPluginRecord({
-        id: "restart-fixture",
-        name: "Restart Fixture",
-      }),
-      register(api) {
-        api.registerSessionSchedulerJob({
-          id: "shared-job",
-          sessionKey: "agent:main:main",
-          kind: "monitor",
-        });
-      },
-    });
+    setActivePluginRegistry(previous);
+    stageActivePluginRegistry(next, null, "default");
 
-    const cleanupResult = await cleanupReplacedPluginHostRegistry({
-      cfg: config,
+    const cleanupResult = await createPluginHostRegistryRetirement({
+      cfg: {},
       previousRegistry: previous,
       nextRegistry: next,
-    });
+    })();
     expect(cleanupResult.failures).toEqual([]);
     expect(cleanupEvents).toStrictEqual([]);
     expect(listPluginSessionSchedulerJobs("restart-fixture")).toEqual([
@@ -2943,6 +2958,7 @@ describe("host-hook fixture plugin contract", () => {
         });
       },
     });
+    setActivePluginRegistry(previousFixture.registry.registry);
 
     const replacementFixture = createPluginRegistryFixture();
     registerTestPlugin({
@@ -2961,12 +2977,13 @@ describe("host-hook fixture plugin contract", () => {
       },
     });
 
+    stageActivePluginRegistry(replacementFixture.registry.registry, null, "default");
     await expect(
-      cleanupReplacedPluginHostRegistry({
+      createPluginHostRegistryRetirement({
         cfg: previousFixture.config,
         previousRegistry: previousFixture.registry.registry,
         nextRegistry: replacementFixture.registry.registry,
-      }),
+      })(),
     ).resolves.toEqual({ cleanupCount: 0, failures: [] });
     expect(cleanupEvents).toEqual([]);
     expect(listPluginSessionSchedulerJobs("scheduler-preserve")).toEqual([
@@ -2980,11 +2997,8 @@ describe("host-hook fixture plugin contract", () => {
   });
 
   it("does not let stale scheduler cleanup delete a newer job generation", async () => {
-    let releaseCleanup: (() => void) | undefined;
-    let markCleanupStarted: (() => void) | undefined;
-    const cleanupStartedPromise = new Promise<void>((resolve) => {
-      markCleanupStarted = resolve;
-    });
+    const cleanupStarted = createDeferredCore();
+    const finishCleanup = createDeferredCore();
     const previousFixture = createPluginRegistryFixture();
     registerTestPlugin({
       registry: previousFixture.registry,
@@ -2999,56 +3013,63 @@ describe("host-hook fixture plugin contract", () => {
           sessionKey: "agent:main:main",
           kind: "monitor",
           cleanup: async () => {
-            if (!markCleanupStarted) {
-              throw new Error("Expected scheduler cleanup start callback to be initialized");
-            }
-            markCleanupStarted();
-            await new Promise<void>((resolve) => {
-              releaseCleanup = resolve;
-            });
+            cleanupStarted.resolve();
+            await finishCleanup.promise;
           },
         });
       },
     });
+    setActivePluginRegistry(previousFixture.registry.registry);
 
-    const cleanupPromise = cleanupReplacedPluginHostRegistry({
+    const next = createEmptyPluginRegistry();
+    stageActivePluginRegistry(next, null, "default");
+    const cleanupPromise = createPluginHostRegistryRetirement({
       cfg: previousFixture.config,
       previousRegistry: previousFixture.registry.registry,
-      nextRegistry: createEmptyPluginRegistry(),
-    });
-    await cleanupStartedPromise;
+      nextRegistry: next,
+    })();
+    try {
+      await Promise.race([
+        cleanupStarted.promise,
+        cleanupPromise.then((result) => {
+          expect(result.failures).toEqual([]);
+          throw new Error("Expected scheduler cleanup to start before retirement settled");
+        }),
+      ]);
 
-    const replacementFixture = createPluginRegistryFixture();
-    registerTestPlugin({
-      registry: replacementFixture.registry,
-      config: replacementFixture.config,
-      record: createPluginRecord({
-        id: "scheduler-race",
-        name: "Scheduler Race",
-      }),
-      register(api) {
-        api.registerSessionSchedulerJob({
+      const replacementFixture = createPluginRegistryFixture();
+      registerTestPlugin({
+        registry: replacementFixture.registry,
+        config: replacementFixture.config,
+        record: createPluginRecord({
+          id: "scheduler-race",
+          name: "Scheduler Race",
+        }),
+        register(api) {
+          api.registerSessionSchedulerJob({
+            id: "shared-job",
+            sessionKey: "agent:main:main",
+            kind: "monitor",
+          });
+        },
+      });
+      setActivePluginRegistry(replacementFixture.registry.registry);
+
+      finishCleanup.resolve();
+      const cleanupResult = await cleanupPromise;
+      expect(cleanupResult.failures).toEqual([]);
+      expect(listPluginSessionSchedulerJobs("scheduler-race")).toEqual([
+        {
           id: "shared-job",
+          pluginId: "scheduler-race",
           sessionKey: "agent:main:main",
           kind: "monitor",
-        });
-      },
-    });
-
-    if (!releaseCleanup) {
-      throw new Error("Expected scheduler cleanup release callback to be initialized");
+        },
+      ]);
+    } finally {
+      finishCleanup.resolve();
+      await cleanupPromise;
     }
-    releaseCleanup();
-    const cleanupResult = await cleanupPromise;
-    expect(cleanupResult.failures).toEqual([]);
-    expect(listPluginSessionSchedulerJobs("scheduler-race")).toEqual([
-      {
-        id: "shared-job",
-        pluginId: "scheduler-race",
-        sessionKey: "agent:main:main",
-        kind: "monitor",
-      },
-    ]);
   });
 
   it("does not register scheduler jobs globally during non-activating registry loads", () => {
@@ -3321,11 +3342,11 @@ describe("host-hook fixture plugin contract", () => {
           return undefined;
         });
 
-        const cleanupResult = await cleanupReplacedPluginHostRegistry({
+        const cleanupResult = await createPluginHostRegistryRetirement({
           cfg: tempConfig,
           previousRegistry,
           nextRegistry: createEmptyPluginRegistry(),
-        });
+        })();
         expect(cleanupResult.failures).toEqual([]);
 
         const stored = loadSessionStore(storePath, { skipCache: true });

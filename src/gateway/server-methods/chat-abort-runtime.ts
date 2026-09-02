@@ -21,9 +21,9 @@ import { SUBAGENT_KILL_TASK_ERROR } from "../../tasks/detached-task-runtime-cont
 import {
   abortChatRunById,
   isChatAbortControllerEntryAbortable,
-  type ChatAbortControllerEntry,
   type ChatAbortOps,
 } from "../chat-abort.js";
+import type { ChatAbortControllerEntry } from "../chat-abort.types.js";
 import { abortQueuedChatTurns, listQueuedChatTurnsForSession } from "../chat-queued-turns.js";
 // Cancellation orchestration across active, queued, pending, and worker runs.
 import { resolveChatRunOwnerAgentId } from "../chat-run-owner.js";

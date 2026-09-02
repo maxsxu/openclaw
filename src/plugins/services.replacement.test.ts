@@ -117,6 +117,90 @@ describe("plugin service replacement", () => {
     },
   );
 
+  it("transfers an unchanged service without restarting it and stops only the replaced owner", async () => {
+    const first = { id: "first", start: vi.fn(), stop: vi.fn() };
+    const sibling = { id: "sibling", start: vi.fn(), stop: vi.fn() };
+    const replacement = { id: "first", start: vi.fn(), stop: vi.fn() };
+    const oldRegistry = createRegistry([first], "first");
+    const siblingRegistration = createRegistry([sibling], "sibling").services[0]!;
+    oldRegistry.services.push(siblingRegistration);
+    const previous = await startPluginServices({
+      registry: oldRegistry,
+      config: createServiceConfig(),
+    });
+    await previous.stop({
+      strict: true,
+      deadlineAtMs: Date.now() + 5_000,
+      pluginIds: new Set(["first"]),
+    });
+    const nextRegistry = createRegistry([replacement], "first");
+    nextRegistry.services.push(siblingRegistration);
+    let current: PluginServicesHandle | undefined;
+    try {
+      await startPluginServices({
+        registry: nextRegistry,
+        config: createServiceConfig(),
+        previous,
+        onHandle: (handle) => {
+          current = handle;
+        },
+        throwOnStartError: true,
+      });
+      expect(first.stop).toHaveBeenCalledOnce();
+      expect(replacement.start).toHaveBeenCalledOnce();
+      expect(sibling.start).toHaveBeenCalledOnce();
+      expect(sibling.stop).not.toHaveBeenCalled();
+    } finally {
+      await current?.stop();
+      await previous.stop();
+    }
+    expect(sibling.stop).toHaveBeenCalledOnce();
+    expect(replacement.stop).toHaveBeenCalledOnce();
+  });
+
+  it("keeps unchanged services with the issued handle when a candidate cannot start", async () => {
+    const sibling = { id: "sibling", start: vi.fn(), stop: vi.fn() };
+    const oldRegistry = createRegistry([sibling], "sibling");
+    const previous = await startPluginServices({
+      registry: oldRegistry,
+      config: createServiceConfig(),
+    });
+    const broken = {
+      id: "broken",
+      start: () => {
+        throw new Error("candidate failed");
+      },
+      stop: vi.fn(),
+    };
+    const nextRegistry = createRegistry([broken], "broken");
+    nextRegistry.services.push(...oldRegistry.services);
+    let issued: PluginServicesHandle | undefined;
+    try {
+      await expect(
+        startPluginServices({
+          registry: nextRegistry,
+          config: createServiceConfig(),
+          previous,
+          onHandle: (handle) => {
+            issued = handle;
+          },
+          throwOnStartError: true,
+        }),
+      ).rejects.toThrow("plugin services failed to start");
+      expect(issued).toBeDefined();
+      expect(broken.stop).toHaveBeenCalledOnce();
+      expect(sibling.start).toHaveBeenCalledOnce();
+      expect(sibling.stop).not.toHaveBeenCalled();
+      await previous.stop();
+      expect(sibling.stop).not.toHaveBeenCalled();
+      await issued?.stop();
+      expect(sibling.stop).toHaveBeenCalledOnce();
+    } finally {
+      await issued?.stop();
+      await previous.stop();
+    }
+  });
+
   it("strictly aggregates ordinary and exporter failures while draining producers first", async () => {
     const order: string[] = [];
     const ordinaryFailure = new Error("ordinary cleanup rejected");
@@ -286,6 +370,14 @@ describe("plugin service replacement", () => {
       expect(siblingStop).toHaveBeenCalledOnce();
       expect(registry.httpRoutes).toEqual([]);
       expect(() => context?.gatewayEvents?.onSessionsChanged(received)).toThrow("no longer active");
+      const health = listPluginServiceHealthFailures(registry);
+      expect(health).toEqual([
+        expect.objectContaining({
+          pluginId: "plugin:test",
+          serviceId: "blocked-cleanup",
+          error: expect.stringContaining("stop timed out"),
+        }),
+      ]);
 
       releaseCleanup?.();
       await Promise.resolve();
@@ -296,7 +388,7 @@ describe("plugin service replacement", () => {
       expect(lateFailures).toHaveLength(4);
       expect(received).not.toHaveBeenCalled();
       expect(broadcastPluginEvent).not.toHaveBeenCalled();
-      expect(listPluginServiceHealthFailures(registry)).toEqual([]);
+      expect(listPluginServiceHealthFailures(registry)).toEqual(health);
       expect(registry.httpRoutes).toEqual([]);
       expect(nestedRegistry.httpRoutes).toEqual([]);
     } finally {
@@ -494,17 +586,24 @@ describe("plugin service replacement", () => {
     }
   });
 
-  it.each(["fulfilled", "rejected", "pending"] as const)(
+  it.each(["fulfilled", "rejected", "pending", "fulfilled-promise", "rejected-promise"] as const)(
     "does not repeat %s cleanup when startup fails after replacement settles",
     async (cleanupState) => {
       vi.useFakeTimers();
       const startup = createDeferredCore();
       const cleanup = createDeferredCore();
+      const cleanupError = new Error("cleanup rejected");
       const order: string[] = [];
       const stop = vi.fn(() => {
         order.push("stop");
         if (cleanupState === "rejected") {
-          throw new Error("cleanup rejected");
+          throw cleanupError;
+        }
+        if (cleanupState === "rejected-promise") {
+          return Promise.reject(cleanupError);
+        }
+        if (cleanupState === "fulfilled-promise") {
+          return Promise.resolve();
         }
         return cleanupState === "pending" ? cleanup.promise : undefined;
       });
@@ -535,9 +634,16 @@ describe("plugin service replacement", () => {
         await vi.advanceTimersByTimeAsync(PLUGIN_SERVICE_REPLACEMENT_STOP_TIMEOUT_MS);
         const failure = await stopped;
         expect(failure).toBeInstanceOf(AggregateError);
-        expect((failure as AggregateError).errors[0]).toMatchObject({
+        const errors = (failure as AggregateError).errors;
+        expect(errors[0]).toMatchObject({
           message: expect.stringContaining("plugin service startup settlement timed out"),
         });
+        expect(errors).toHaveLength(
+          cleanupState === "fulfilled" || cleanupState === "fulfilled-promise" ? 1 : 2,
+        );
+        if (cleanupState === "rejected" || cleanupState === "rejected-promise") {
+          expect(errors[1]).toHaveProperty("cause", cleanupError);
+        }
         order.push("replacement-settled");
         startup.reject(new Error("startup failed after replacement"));
         await vi.advanceTimersByTimeAsync(0);

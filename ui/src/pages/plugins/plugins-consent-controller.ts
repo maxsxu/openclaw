@@ -10,6 +10,7 @@ import {
 } from "../../lib/plugins/capability-consent-error.ts";
 import {
   installPlugin,
+  reloadPlugin,
   runPluginConfigMutation,
   setPluginEnabled,
   type PluginInstallRequest,
@@ -20,7 +21,6 @@ import {
 import type { GatewayPageController } from "../../lit/gateway-page-controller.ts";
 import type { PluginConsentIntent, PluginConsentState } from "./consent-dialog.ts";
 import { readPluginInstallPolicyWarning } from "./install-policy-warning.ts";
-import { confirmPluginInstall } from "./plugin-lifecycle-confirmation.ts";
 import { pluginRowKey, type PluginRowMessage } from "./view.ts";
 
 type PluginMutationSuccess<Result> = (
@@ -56,14 +56,11 @@ function committedMutationMessage(
   result: PluginMutationResult,
   refreshError: string | null,
 ): PluginRowMessage {
-  const key = result.restartRequired
-    ? `pluginsPage.${action}Restart`
-    : `pluginsPage.${action}Success`;
   const warnings = "warnings" in result ? (result.warnings ?? []) : [];
   return {
     kind: "success",
     text: [
-      t(key, { name: result.plugin.name }),
+      t(`pluginsPage.${action}Success`, { name: result.plugin.name }),
       ...warnings.map((warning) => formatUiExternalText(warning)),
       refreshError ? t("pluginsPage.configRefreshFailed", { error: refreshError }) : null,
     ]
@@ -80,16 +77,12 @@ export class PluginsConsentController {
 
   private mutationToken = 0;
   private readonly mutationTokens = new Map<string, number>();
-  // Server reviews continue one confirmed install only while its Gateway epoch survives.
-  // Reconnect reset drops the scope before a surviving row warning can be acknowledged.
-  private readonly confirmedInstallScopes = new Map<string, GatewayConnectionScope>();
 
   constructor(private readonly host: PluginsConsentControllerHost) {}
 
   reset(): void {
     this.close();
     this.mutationTokens.clear();
-    this.confirmedInstallScopes.clear();
   }
 
   async runMutation<Result>(
@@ -223,6 +216,10 @@ export class PluginsConsentController {
         },
         intent.installIdentity,
       );
+    } else if (intent.kind === "reload") {
+      void this.reload(intent.pluginId, intent.rowKey, {
+        acknowledgeCapabilities: { reviewToken },
+      });
     } else {
       void this.updateEnabled(intent.pluginId, true, intent.rowKey, {
         acknowledgeCapabilities: { reviewToken },
@@ -231,13 +228,6 @@ export class PluginsConsentController {
   }
 
   async install(request: PluginInstallRequest, installIdentity: string): Promise<void> {
-    const confirmedScope = this.confirmedInstallScopes.get(installIdentity);
-    this.confirmedInstallScopes.delete(installIdentity);
-    const isConfirmedContinuation =
-      (request.acknowledgeInstallPolicyWarning === true ||
-        request.acknowledgeCapabilities !== undefined) &&
-      confirmedScope &&
-      this.host.gateway.isCurrent(confirmedScope);
     // The server stages and inspects the requested artifact before asking for consent.
     // Catalog/search metadata cannot authorize that artifact's capabilities.
     await this.runMutation(
@@ -256,13 +246,11 @@ export class PluginsConsentController {
         await this.host.refreshCatalogAfterMutation(client);
       },
       {
-        confirm: isConfirmedContinuation ? undefined : () => confirmPluginInstall(request),
         preserveMessageWhilePending: request.acknowledgeInstallPolicyWarning === true,
       },
-      (error, scope) => {
+      (error) => {
         const consentDetails = readPluginCapabilityConsentError(error);
         if (consentDetails) {
-          this.confirmedInstallScopes.set(installIdentity, scope);
           this.open(
             { kind: "install", request, installIdentity },
             consentDetails.pluginId,
@@ -272,7 +260,6 @@ export class PluginsConsentController {
         }
         const policyWarning = readPluginInstallPolicyWarning(error);
         if (policyWarning) {
-          this.confirmedInstallScopes.set(installIdentity, scope);
           this.host.setMessage(installIdentity, {
             kind: "warning",
             text: policyWarning.reason,
@@ -295,17 +282,13 @@ export class PluginsConsentController {
     await this.runMutation(
       key,
       (client) => setPluginEnabled(client, pluginId, enabled, options),
-      async (result, refreshError, client, isCurrent) => {
+      async (result, refreshError, client) => {
         this.host.applyMutationResult(result);
         this.host.setMessage(
           key,
           committedMutationMessage(enabled ? "enabled" : "disabled", result, refreshError),
         );
         await this.host.refreshCatalogAfterMutation(client);
-        if (isCurrent() && !result.restartRequired) {
-          // Plugin tabs come from hello; reconnect after the registry refresh.
-          this.host.getContext().gateway.connect();
-        }
       },
       {},
       (error) => {
@@ -315,6 +298,38 @@ export class PluginsConsentController {
           return;
         }
         this.host.setMessage(key, { kind: "error", text: formatUiError(error) });
+      },
+    );
+  }
+
+  async reload(
+    pluginId: string,
+    rowKey = pluginRowKey(pluginId),
+    options: Parameters<typeof reloadPlugin>[2] = {},
+  ): Promise<void> {
+    await this.runMutation(
+      rowKey,
+      (client) => reloadPlugin(client, pluginId, options),
+      async (result, refreshError, client) => {
+        this.host.setMessage(rowKey, {
+          kind: "success",
+          text: [
+            t("pluginsPage.reloadedSuccess", { name: result.pluginId }),
+            refreshError ? t("pluginsPage.configRefreshFailed", { error: refreshError }) : null,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        });
+        await this.host.refreshCatalogAfterMutation(client);
+      },
+      {},
+      (error) => {
+        const details = readPluginCapabilityConsentError(error);
+        if (details) {
+          this.open({ kind: "reload", pluginId, rowKey }, details.pluginId, details);
+        } else {
+          this.host.setMessage(rowKey, { kind: "error", text: formatUiError(error) });
+        }
       },
     );
   }

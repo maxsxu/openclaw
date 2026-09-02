@@ -4,6 +4,7 @@ import type { AgentExecutionAuthBinding } from "../agents/execution-auth-binding
 import type { ConfigSetOptions } from "../cli/config-set-input.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { formatErrorMessage } from "../infra/errors.js";
+import type { PluginLifecycleRuntimeApply } from "../plugins/lifecycle.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { resolveUserPath, shortenHomePath } from "../utils.js";
@@ -197,6 +198,7 @@ export type ExecuteOptions = {
   operatorApprovalOnly?: boolean;
   deps?: SystemAgentCommandDeps;
   auditDetails?: Record<string, unknown>;
+  applyPluginRuntime?: PluginLifecycleRuntimeApply;
   /**
    * Authority check used by the guarded commit seam for host-approved writes.
    * A multi-step operation may invoke it more than once; every invocation is

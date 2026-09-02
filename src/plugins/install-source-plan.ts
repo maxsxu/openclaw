@@ -1,25 +1,27 @@
 // Plugin install planning helpers for bundled, official external, and npm fallback paths.
 import fs from "node:fs";
 import path from "node:path";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import type { PluginsInstallParams } from "../../packages/gateway-protocol/src/schema/plugins.js";
 import { resolveArchiveKind } from "../infra/archive.js";
 import { parseClawHubPluginSpec } from "../infra/clawhub-spec.js";
+import { looksLikeLocalInstallSpec } from "../infra/install-spec.js";
 import { parseRegistryNpmSpec } from "../infra/npm-registry-spec.js";
-import { findBundledPluginSource, type BundledPluginSource } from "../plugins/bundled-sources.js";
-import { parseGitPluginSpec } from "../plugins/git-install.js";
+import { resolveUserPath, shortenHomePath } from "../utils.js";
+import { findBundledPluginSource, type BundledPluginSource } from "./bundled-sources.js";
+import { parseGitPluginSpec } from "./git-install.js";
+import { resolveDefaultNpmSpec } from "./install-channel-specs.js";
 import {
   resolveOpenClawTrustedNpmPackageInstall,
   type NonClawHubInstallSourceClass,
-} from "../plugins/install-provenance.js";
-import { PLUGIN_INSTALL_ERROR_CODE } from "../plugins/install.js";
-import type { ManagedPluginSourceInstallRequest } from "../plugins/management-service.js";
-import { resolveCatalogOfficialExternalInstallPlan } from "../plugins/official-external-install-trust.js";
-import { resolveUserPath, shortenHomePath } from "../utils.js";
-import { looksLikeLocalInstallSpec } from "./install-spec.js";
+} from "./install-provenance.js";
 import {
   parseNpmPackPrefixPath,
   parseNpmPrefixSpec,
   resolveFileNpmSpecToLocalPath,
-} from "./plugins-command-helpers.js";
+} from "./install-source-spec.js";
+import { PLUGIN_INSTALL_ERROR_CODE } from "./install.js";
+import { resolveCatalogOfficialExternalInstallPlan } from "./official-external-install-trust.js";
 
 type BundledLookup = (params: {
   kind: "pluginId" | "npmSpec";
@@ -30,18 +32,22 @@ type PluginInstallSourcePlan =
   | { ok: false; error: string }
   | {
       ok: true;
-      request: ManagedPluginSourceInstallRequest;
+      request: PluginsInstallParams;
+      warning?: string;
+      allowBundledFallback?: boolean;
       acknowledgement?: { sourceClass: NonClawHubInstallSourceClass; spec: string };
     };
 
 function sourcePlan(
-  request: ManagedPluginSourceInstallRequest,
+  request: PluginsInstallParams,
   raw: string,
   sourceClass?: NonClawHubInstallSourceClass,
+  metadata: { warning?: string; allowBundledFallback?: boolean } = {},
 ): PluginInstallSourcePlan {
   return {
     ok: true,
     request,
+    ...metadata,
     ...(sourceClass ? { acknowledgement: { sourceClass, spec: raw } } : {}),
   };
 }
@@ -68,9 +74,7 @@ export function resolvePluginInstallSourcePlan(params: {
       {
         source: "local",
         path: resolved,
-        recordSource,
         mode: params.mode,
-        ...(bundled ? { bundledOrigin: true } : {}),
         ...(params.link ? { link: true } : {}),
       },
       params.raw,
@@ -99,7 +103,15 @@ export function resolvePluginInstallSourcePlan(params: {
   const clawhub = parseClawHubPluginSpec(params.raw);
   if (clawhubPrefix) {
     return clawhub
-      ? sourcePlan({ source: "clawhub", spec: params.raw, mode: params.mode }, params.raw)
+      ? sourcePlan(
+          {
+            source: "clawhub",
+            packageName: clawhub.name,
+            version: clawhub.version,
+            mode: params.mode,
+          },
+          params.raw,
+        )
       : { ok: false, error: `Unsupported ClawHub plugin spec: ${params.raw}` };
   }
   const explicitNpm = parseNpmPrefixSpec(params.raw);
@@ -134,11 +146,11 @@ export function resolvePluginInstallSourcePlan(params: {
     return sourcePlan(
       {
         source: "bundled",
-        rawSpec: params.raw,
-        bundledSource: bundledPlan.bundledSource,
-        warning: bundledPlan.warning,
+        pluginId: bundledPlan.bundledSource.pluginId,
       },
       params.raw,
+      undefined,
+      { warning: bundledPlan.warning },
     );
   }
   const official =
@@ -147,10 +159,8 @@ export function resolvePluginInstallSourcePlan(params: {
     return sourcePlan(
       {
         source: "official",
-        spec: official.spec,
-        installSources: official.installSources,
-        expectedPluginId: official.pluginId,
         pluginId: official.pluginId,
+        ...(resolveDefaultNpmSpec(params.raw)?.selector ? { version: "latest" as const } : {}),
         mode: params.mode,
         ...(params.pin ? { pin: true } : {}),
       },
@@ -164,17 +174,16 @@ export function resolvePluginInstallSourcePlan(params: {
       spec: npmSpec,
       mode: params.mode,
       ...(params.pin ? { pin: true } : {}),
-      ...(explicitNpm === null ? { allowBundledFallback: true } : {}),
       ...(trusted
         ? {
             expectedPluginId: trusted.pluginId,
             ...(trusted.expectedIntegrity ? { expectedIntegrity: trusted.expectedIntegrity } : {}),
-            trustedSourceLinkedOfficialInstall: true,
           }
         : {}),
     },
     params.raw,
     trusted ? undefined : "npm",
+    { allowBundledFallback: explicitNpm === null },
   );
 }
 
@@ -193,10 +202,11 @@ function isSourceCheckoutBundledPath(localPath: string): boolean {
     ? path.dirname(extensionsParent)
     : extensionsParent;
   try {
-    const packageJson = JSON.parse(
+    const packageJson: unknown = JSON.parse(
       fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"),
-    ) as { name?: unknown };
+    );
     return (
+      isRecord(packageJson) &&
       packageJson.name === "openclaw" &&
       fs.existsSync(path.join(packageRoot, ".git")) &&
       fs.existsSync(path.join(packageRoot, "pnpm-workspace.yaml")) &&

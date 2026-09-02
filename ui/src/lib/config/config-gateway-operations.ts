@@ -227,6 +227,11 @@ export async function executeConfigExternalMutation<T>(
   }
 }
 
+const configLoadsByState = new WeakMap<
+  RuntimeConfigState,
+  { version: number; result: Promise<boolean> }
+>();
+
 export async function loadConfig(
   state: RuntimeConfigState,
   options: LoadConfigOptions & { background?: boolean; beforeApplySnapshot?: () => void } = {},
@@ -238,32 +243,61 @@ export async function loadConfig(
   }
   const connectionEpoch = currentConfigConnectionEpoch(state);
   const version = nextRequestVersion(state, "config");
+  const isCurrent = () => isCurrentRequest(state, "config", version, client, connectionEpoch);
   if (!options.background) {
     state.configLoading = true;
   }
   state.lastError = null;
   state.chatError = null;
-  try {
-    const res = await client.request<ConfigSnapshot>("config.get", {});
-    if (!isCurrentRequest(state, "config", version, client, connectionEpoch) || !isCurrentLoad()) {
+  let load = {
+    version,
+    result: (async () => {
+      try {
+        const res = await client.request<ConfigSnapshot>("config.get", {});
+        if (!isCurrent() || !isCurrentLoad()) {
+          return false;
+        }
+        // Recovery captures the latest intent before a clean draft is replaced.
+        options.beforeApplySnapshot?.();
+        applyConfigSnapshot(state, res, options);
+        return true;
+      } catch (err) {
+        if (isCurrent()) {
+          state.lastError = formatUiError(err);
+        }
+        return false;
+      } finally {
+        // A background read can supersede the foreground read that raised this flag.
+        if (isCurrent()) {
+          state.configLoading = false;
+        }
+      }
+    })(),
+  };
+  if (isCurrent()) {
+    configLoadsByState.set(state, load);
+  }
+  // Keep the latest completion: it may settle before an older mutation read.
+  // Only ordinary reads can share it; recovery/discard own application intent.
+  while (true) {
+    const loaded = await load.result;
+    if (!isCurrentLoad()) {
       return false;
     }
-    // Recovery captures the latest intent before a clean draft is replaced.
-    options.beforeApplySnapshot?.();
-    applyConfigSnapshot(state, res, options);
-    return true;
-  } catch (err) {
-    if (isCurrentRequest(state, "config", version, client, connectionEpoch)) {
-      state.lastError = formatUiError(err);
+    if (isCurrentRequest(state, "config", load.version, client, connectionEpoch)) {
+      return loaded;
     }
-    return false;
-  } finally {
+    const latest = configLoadsByState.get(state);
     if (
-      !options.background &&
-      isCurrentRequest(state, "config", version, client, connectionEpoch)
+      options.beforeApplySnapshot ||
+      options.discardPendingChanges ||
+      !latest ||
+      latest === load ||
+      !isCurrentRequest(state, "config", latest.version, client, connectionEpoch)
     ) {
-      state.configLoading = false;
+      return false;
     }
+    load = latest;
   }
 }
 

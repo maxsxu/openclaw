@@ -43,12 +43,15 @@ import {
   writePlugin,
 } from "./loader.test-fixtures.js";
 import { buildMemoryPromptSection, registerMemoryCapability } from "./memory-state.js";
+import { adoptProcessPluginCache, createPluginCache, withPluginCache } from "./plugin-cache.js";
+import { getPluginInstance } from "./plugin-instance-scope.js";
 import { clearPluginMetadataLifecycleCaches } from "./plugin-metadata-lifecycle.js";
 import { getPluginModuleLoaderStats } from "./plugin-module-loader-cache.js";
-import { pluginLoaderCacheState } from "./registry-lifecycle.js";
+import { getPluginLoaderCacheState } from "./registry-lifecycle.js";
 import { getPluginRegistryRuntime } from "./registry-runtime-binding.js";
 import { createEmptyPluginRegistry } from "./registry.js";
 import {
+  disposePluginRegistryInstances,
   captureActivePluginRegistrySnapshot,
   clearActivePluginRegistry,
   commitStagedPluginRegistry,
@@ -77,8 +80,6 @@ it.each(["cjs", "ts"])(
       const sync = api.runtime.state.openSyncKeyedStore({ namespace: "registration", maxEntries: 2 });
       const entries = sync.entries();
       const system = api.runtime.system;
-      system.enqueueSystemEvent("registration", { sessionKey: "prepared-runtime-system" });
-      system.requestHeartbeat({ source: "other", intent: "immediate", reason: "registration", coalesceMs: 0 });
       const asyncStore = api.runtime.state.openKeyedStore({ namespace: "registration", maxEntries: 2 });
       fs.writeFileSync(${JSON.stringify(observed)}, JSON.stringify({ entries, config: api.runtime.config.current() }));
       api.registerCli(({ program }) => program.command("state-proof").action(async () => {
@@ -124,14 +125,14 @@ it.each(["cjs", "ts"])(
           );
           vi.spyOn(loaderModule, "createPluginModuleLoader").mockImplementation((options) => {
             const load = createLoader(options);
-            return (modulePath) => {
+            return (modulePath, owner) => {
               if (modulePath === resolveRuntime.mock.results.at(-1)?.value?.resolvedPath) {
                 if (!fullRuntime) {
                   throw new Error("broad runtime requested before state registration completed");
                 }
                 return { createPluginRuntime: factories };
               }
-              return load(modulePath);
+              return load(modulePath, owner);
             };
           });
           const hooks = {
@@ -166,12 +167,8 @@ it.each(["cjs", "ts"])(
           );
           const loadedStats = getPluginModuleLoaderStats();
           if (extension === "ts") {
-            expect(loadedStats.sourceTransformForced).toBeGreaterThan(
-              loaderStats.sourceTransformForced,
-            );
-            expect(loadedStats.topSourceTransformTargets).toContainEqual(
-              expect.objectContaining({ target: plugin.file }),
-            );
+            const record = registry.plugins.find((candidate) => candidate.id === plugin.id)!;
+            expect(getPluginInstance(record)?.hasModuleSource(plugin.file)).toBe(true);
           } else {
             expect(loadedStats.nativeHits).toBeGreaterThan(loaderStats.nativeHits);
           }
@@ -187,12 +184,8 @@ it.each(["cjs", "ts"])(
           const system = runtime.system;
           expect(system.requestHeartbeat).toBe(requestHeartbeat);
           expect(system.runCommandWithTimeout).toBe(runCommandWithTimeout);
-          expect(drainSystemEvents("prepared-runtime-system")).toEqual(["registration"]);
-          await vi.waitFor(() =>
-            expect(heartbeat).toHaveBeenCalledWith(
-              expect.objectContaining({ reason: "registration" }),
-            ),
-          );
+          expect(drainSystemEvents("prepared-runtime-system")).toEqual([]);
+          expect(heartbeat).not.toHaveBeenCalled();
           const command = await system.runCommandWithTimeout(
             [process.execPath, "-e", 'process.stdout.write("system-ready")'],
             { timeoutMs: 1_000, killProcessTree: true },
@@ -646,24 +639,64 @@ describe("resolveRuntimePluginRegistry", () => {
 });
 
 describe("clearPluginRegistryLoadCache", () => {
+  it("reuses captured sources only within their cache generation", async () => {
+    useNoBundledPlugins();
+    const source = (version: string) => `module.exports = {
+      id: "cache-generation", register(api) {
+        api.registerGatewayMethod("cache.${version}", () => {});
+      },
+    };`;
+    const plugin = writePlugin({ id: "cache-generation", body: source("first") });
+    const options = {
+      config: {
+        plugins: {
+          allow: [plugin.id],
+          load: { paths: [plugin.file] },
+          slots: { memory: "none" },
+        },
+      },
+    };
+    const firstCache = createPluginCache();
+    const first = withPluginCache(firstCache, () => loadPluginRegistryHandle(options));
+    const registries = [first];
+    try {
+      writeFileSync(plugin.file, source("second"));
+      expect(withPluginCache(firstCache, () => loadPluginRegistryHandle(options))).toBe(first);
+      const secondCache = createPluginCache();
+      const second = withPluginCache(secondCache, () => loadPluginRegistryHandle(options));
+      registries.push(second);
+      expect(Object.keys(first.gatewayHandlers)).toEqual(["cache.first"]);
+      expect(Object.keys(second.gatewayHandlers)).toEqual(["cache.second"]);
+      adoptProcessPluginCache(secondCache);
+      expect(loadPluginRegistryHandle(options)).toBe(second);
+      expect(withPluginCache(firstCache, () => loadPluginRegistryHandle(options))).toBe(first);
+    } finally {
+      await Promise.all(registries.map((registry) => disposePluginRegistryInstances(registry)));
+    }
+  });
+
   it.each(["commit", "rollback"])(
     "releases only the retired cache aliases after staged %s",
     (action) => {
       const original = createEmptyPluginRegistry();
       const candidate = createEmptyPluginRegistry();
-      pluginLoaderCacheState.set("original", original);
-      pluginLoaderCacheState.set("original-alias", original);
-      pluginLoaderCacheState.set("candidate", candidate);
-      pluginLoaderCacheState.set("candidate-alias", candidate);
+      const originalCache = getPluginLoaderCacheState(createPluginCache());
+      const candidateOwner = createPluginCache();
+      const candidateCache = getPluginLoaderCacheState(candidateOwner);
+      originalCache.set("original", original);
+      candidateCache.set("original-alias", original);
+      originalCache.set("candidate-alias", candidate);
+      candidateCache.set("candidate", candidate);
       setActivePluginRegistry(original, "original");
       const snapshot = captureActivePluginRegistrySnapshot();
 
       stageActivePluginRegistry(candidate, "candidate", "default");
-      expect(pluginLoaderCacheState.get("original") === original).toBe(true);
-      expect(pluginLoaderCacheState.get("candidate") === candidate).toBe(true);
+      adoptProcessPluginCache(candidateOwner);
+      expect(originalCache.get("original") === original).toBe(true);
+      expect(candidateCache.get("candidate") === candidate).toBe(true);
       // Reusing a key must not let the old value's retirement evict its successor.
-      pluginLoaderCacheState.set("reused-key", original);
-      pluginLoaderCacheState.set("reused-key", candidate);
+      originalCache.set("reused-key", original);
+      originalCache.set("reused-key", candidate);
 
       if (action === "commit") {
         commitStagedPluginRegistry(original, candidate);
@@ -672,11 +705,11 @@ describe("clearPluginRegistryLoadCache", () => {
       }
 
       const committed = action === "commit";
-      for (const key of ["original", "original-alias"]) {
-        expect(pluginLoaderCacheState.get(key) === original).toBe(!committed);
-      }
-      for (const key of ["candidate", "candidate-alias", "reused-key"]) {
-        expect(pluginLoaderCacheState.get(key) === candidate).toBe(committed);
+      expect(originalCache.get("original") === original).toBe(!committed);
+      expect(candidateCache.get("original-alias") === original).toBe(!committed);
+      expect(candidateCache.get("candidate") === candidate).toBe(committed);
+      for (const key of ["candidate-alias", "reused-key"]) {
+        expect(originalCache.get(key) === candidate).toBe(committed);
       }
     },
   );
@@ -690,12 +723,10 @@ describe("clearPluginRegistryLoadCache", () => {
         body: `module.exports = {
           id: "retirement-probe",
           register(api) {
-            let closed = false;
-            api.registerRuntimeLifecycle({ id: "close", cleanup() { closed = true; } });
             api.registerTool({
               name: "retirement_probe", description: "Read fixture lifetime",
               parameters: { type: "object", properties: {} },
-              execute() { return { content: [{ type: "text", text: closed ? "closed" : "live" }] }; },
+              execute() { return { content: [{ type: "text", text: "live" }] }; },
             });
           },
         };`,
@@ -736,17 +767,16 @@ describe("clearPluginRegistryLoadCache", () => {
         const replacement = loadOpenClawPlugins(replacementOptions);
         expect(replacement).not.toBe(original);
         expect(await read(replacement)).toMatchObject({ content: [{ text: "live" }] });
-        await vi.waitFor(async () => {
-          expect(await read(original)).toMatchObject({ content: [{ text: "closed" }] });
-        });
         expect(loadOpenClawPlugins(replacementOptions)).toBe(replacement);
         expect(
-          pluginLoaderCacheState.get(resolvePluginLoadCacheContext(replacementOptions).cacheKey),
+          getPluginLoaderCacheState().get(
+            resolvePluginLoadCacheContext(replacementOptions).cacheKey,
+          ),
         ).toBe(replacement);
       }
 
-      expect(pluginLoaderCacheState.get(originalKey) === undefined).toBe(true);
-      expect(await read(original)).toMatchObject({ content: [{ text: "closed" }] });
+      expect(getPluginLoaderCacheState().get(originalKey) === undefined).toBe(true);
+      await expect(read(original)).rejects.toThrow(/reloaded|disabled|retiring/);
       const reloaded = loadOpenClawPlugins(options);
       expect(await read(reloaded)).toMatchObject({ content: [{ text: "live" }] });
       expect(reloaded).not.toBe(original);

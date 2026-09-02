@@ -1,9 +1,8 @@
 // Hook installs must preserve discovery and execution across copied and linked layouts.
 import fs from "node:fs/promises";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadConfigForInstall } from "../cli/plugins-install-config.js";
-import { tryInstallHookPackFromLocalPath } from "../cli/plugins-install-hook-fallback.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { runPluginInstallCommand } from "../cli/plugins-install-command.js";
 import { readConfigFileSnapshot } from "../config/config.js";
 import {
   createOpenClawTestState,
@@ -91,19 +90,20 @@ describe.each([
         await writeHook(path.join(sourceDir, "hooks", "unlisted-nested"), "unlisted-nested");
       }
 
-      const snapshot = await loadConfigForInstall({
-        rawSpec: sourceDir,
-        normalizedSpec: sourceDir,
-        resolvedPath: sourceDir,
+      const error = vi.fn();
+      await runPluginInstallCommand({
+        raw: sourceDir,
+        allowInstallPolicyWarningPrompt: false,
+        opts: { force: true, link },
+        runtime: {
+          log() {},
+          error,
+          exit: (code) => {
+            throw new Error(`install exited: ${code}`);
+          },
+        },
       });
-      const installResult = await tryInstallHookPackFromLocalPath({
-        snapshot,
-        resolvedPath: sourceDir,
-        installMode: "install",
-        safetyOverrides: { config: snapshot.config },
-        link,
-      });
-      expect(installResult).toEqual({ ok: true });
+      expect(error).not.toHaveBeenCalled();
 
       const installed = await readConfigFileSnapshot();
       expect(installed.valid).toBe(true);

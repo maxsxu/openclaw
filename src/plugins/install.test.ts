@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 // Covers plugin install flows, manifests, and install records.
 import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
@@ -2624,7 +2625,7 @@ describe("installPluginFromNpmSpec", () => {
     expect(requests[0]?.request.mode).toBe("install");
   });
 
-  it("reports update mode to policy when npm update installs a new artifact generation", async () => {
+  it("preserves the active package until a validated npm update replaces its canonical project", async () => {
     const root = suiteTempRootTracker.makeTempDir();
     const npmDir = path.join(root, "npm");
     const extensionsDir = path.join(root, "extensions");
@@ -2644,11 +2645,15 @@ describe("installPluginFromNpmSpec", () => {
         openclaw: { extensions: ["index.js"] },
       }),
     );
-    fs.writeFileSync(path.join(existingPackageDir, "index.js"), "export {};\n");
+    fs.writeFileSync(
+      path.join(existingPackageDir, "index.js"),
+      'module.exports = () => "0.9.0";\n',
+    );
     const { scriptPath, logPath } = writeInstallOnlyBlockingPolicyScript(root);
     mockNpmViewMetadata({ name: packageName, version: "1.2.3" });
     mockSuccessfulManagedNpmInstall({ packageName, version: "1.2.3" });
     const captured = captureSecurityEvents();
+    let previousVersionAtCommit: unknown;
 
     let result: Awaited<ReturnType<typeof installPluginFromNpmSpec>>;
     try {
@@ -2658,6 +2663,18 @@ describe("installPluginFromNpmSpec", () => {
         npmDir,
         config: configWithInstallPolicy(scriptPath, logPath),
         mode: "update",
+        onBeforePluginArtifactCommit: async ({ currentArtifactDir, stagedArtifactDir }) => {
+          expect(currentArtifactDir).toBe(existingPackageDir);
+          expect(stagedArtifactDir).not.toBe(existingPackageDir);
+          const readPreviousVersion = createRequire(import.meta.url)(
+            path.join(existingPackageDir, "index.js"),
+          );
+          previousVersionAtCommit = readPreviousVersion();
+          expect(
+            JSON.parse(fs.readFileSync(path.join(stagedArtifactDir, "package.json"), "utf8"))
+              .version,
+          ).toBe("1.2.3");
+        },
       });
     } finally {
       captured.stop();
@@ -2667,7 +2684,11 @@ describe("installPluginFromNpmSpec", () => {
     if (!result!.ok) {
       return;
     }
-    expect(result.targetDir).not.toBe(existingPackageDir);
+    expect(previousVersionAtCommit).toBe("0.9.0");
+    expect(result.targetDir).toBe(existingPackageDir);
+    expect(
+      JSON.parse(fs.readFileSync(path.join(result.targetDir, "package.json"), "utf8")).version,
+    ).toBe("1.2.3");
     const requests = readCapturedInstallPolicyRequests(logPath);
     expect(requests.length).toBeGreaterThan(0);
     expect(requests.map((request) => request.request.mode)).toEqual(requests.map(() => "update"));
@@ -2722,7 +2743,7 @@ describe("installPluginFromNpmSpec", () => {
     expect(requests[0]?.request.kind).toBe("plugin-npm");
   });
 
-  it("reports install mode to policy when update-mode reactivates retained generations", async () => {
+  it("reports install mode to policy when update-mode only finds retained projects", async () => {
     const root = suiteTempRootTracker.makeTempDir();
     const npmDir = path.join(root, "npm");
     const extensionsDir = path.join(root, "extensions");
@@ -2735,17 +2756,6 @@ describe("installPluginFromNpmSpec", () => {
         "\n",
       ),
     });
-    const activeGenerationProjectRoot = resolvePluginNpmGenerationProjectDir({
-      npmDir,
-      packageName,
-      generationKey: [
-        packageName,
-        "2.0.0",
-        `${packageName}@2.0.0`,
-        "sha512-active",
-        "active123",
-      ].join("\n"),
-    });
     const legacyPackageDir = path.join(
       legacyProjectRoot,
       "node_modules",
@@ -2756,13 +2766,9 @@ describe("installPluginFromNpmSpec", () => {
       "node_modules",
       ...packageName.split("/"),
     );
-    const activeGenerationPackageDir = path.join(
-      activeGenerationProjectRoot,
-      "node_modules",
-      ...packageName.split("/"),
-    );
     for (const packageDir of [legacyPackageDir, generationPackageDir]) {
       fs.mkdirSync(packageDir, { recursive: true });
+      writeMinimalPackagePlugin(packageDir, packageName);
       await markRetainedManagedNpmInstall({
         packageDir,
         pluginId: "policy-generation-plugin",
@@ -2770,7 +2776,6 @@ describe("installPluginFromNpmSpec", () => {
         reason: "test-retained-generation",
       });
     }
-    fs.mkdirSync(activeGenerationPackageDir, { recursive: true });
     const { scriptPath, logPath } = writeInstallOnlyBlockingPolicyScript(root);
     mockNpmViewMetadata({
       name: packageName,

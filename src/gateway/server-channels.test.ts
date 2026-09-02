@@ -29,6 +29,7 @@ import {
 import { registerPluginCommandInRegistry } from "../plugins/command-registration.js";
 import { registerPluginHttpRoute } from "../plugins/http-registry.js";
 import { createPluginCommandRuntime } from "../plugins/plugin-command-runtime.js";
+import { PluginInstance } from "../plugins/plugin-instance.js";
 import { createEmptyPluginRegistry, type PluginRegistry } from "../plugins/registry.js";
 import { getActivePluginRegistry, setActivePluginRegistry } from "../plugins/runtime.js";
 import { createRuntimeChannel } from "../plugins/runtime/runtime-channel.js";
@@ -760,6 +761,39 @@ describe("server-channels auto restart", () => {
     expect(account?.lastError).toBeNull();
   });
 
+  it("admits only host-owned account cleanup after a plugin quiesces", async () => {
+    const stopAccount = vi.fn(async (_ctx: ChannelGatewayContext<TestAccount>) => {});
+    const instance = new PluginInstance("discord");
+    const plugin = instance.wrap(
+      createTestPlugin({
+        startAccount: async (ctx) =>
+          new Promise<void>((resolve) => {
+            ctx.abortSignal.addEventListener("abort", () => resolve(), { once: true });
+          }),
+        stopAccount,
+      }),
+    );
+    installTestRegistry(plugin);
+    const manager = createManager();
+    await manager.startChannels();
+    await flushMicrotasks();
+    instance.quiesce();
+    expect(() => plugin.config.resolveAccount({}, DEFAULT_ACCOUNT_ID)).toThrow(
+      "reloaded or disabled",
+    );
+    await manager.stopChannel("discord", undefined, { strict: true });
+    expect(stopAccount).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        accountId: DEFAULT_ACCOUNT_ID,
+        account: { enabled: true, configured: true },
+      }),
+    );
+    expect(() => plugin.config.resolveAccount({}, DEFAULT_ACCOUNT_ID)).toThrow(
+      "reloaded or disabled",
+    );
+    await instance.dispose();
+  });
+
   it("records starting on every start and preserves explicit blocked over connected ready", async () => {
     const lifecycleAtHandoff: Array<ChannelAccountSnapshot["lifecycle"]> = [];
     const startAccount = vi.fn(async (ctx: ChannelGatewayContext<TestAccount>) => {
@@ -964,6 +998,11 @@ describe("server-channels auto restart", () => {
       restartPending: false,
       lastError: "second stop failed",
     });
+
+    await manager.stopChannel("discord", DEFAULT_ACCOUNT_ID);
+    expect(stopAccount).toHaveBeenCalledTimes(3);
+    await manager.startChannel("discord", DEFAULT_ACCOUNT_ID);
+    expect(startAccount).toHaveBeenCalledTimes(2);
   });
 
   it("keeps a timed-out stop hook failure authoritative after late task settlement", async () => {

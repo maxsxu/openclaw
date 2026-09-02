@@ -8,6 +8,8 @@ import type {
   PluginsInspectResult as ProtocolPluginsInspectResult,
   PluginsInstallParams,
   PluginsInstallResult,
+  PluginsReloadParams,
+  PluginsReloadResult,
   PluginsListResult as ProtocolPluginsListResult,
   PluginsSearchResult as ProtocolPluginsSearchResult,
   PluginsSetEnabledParams,
@@ -25,7 +27,10 @@ export type PluginOperatorGrants = ProtocolPluginOperatorGrants;
 export type PluginsInspectResult = ProtocolPluginsInspectResult;
 export type PluginListResult = ProtocolPluginsListResult;
 export type PluginSearchResult = ProtocolPluginsSearchResult["results"][number];
-export type PluginInstallRequest = PluginsInstallParams;
+export type PluginInstallRequest = Extract<
+  PluginsInstallParams,
+  { source: "official" | "clawhub" }
+>;
 export type PluginMutationResult = PluginsInstallResult | PluginsSetEnabledResult;
 type PluginUninstallResult = PluginsUninstallResult;
 
@@ -80,6 +85,14 @@ export function setPluginEnabled(
     enabled,
     ...options,
   });
+}
+
+export function reloadPlugin(
+  client: GatewayBrowserClient,
+  pluginId: string,
+  options?: Pick<PluginsReloadParams, "acknowledgeCapabilities">,
+): Promise<PluginsReloadResult> {
+  return client.request<PluginsReloadResult>("plugins.reload", { pluginId, ...options });
 }
 
 /** Serialize every plugin config write without discarding structured Gateway failures. */

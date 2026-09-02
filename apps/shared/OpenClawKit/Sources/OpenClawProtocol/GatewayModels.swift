@@ -1409,8 +1409,8 @@ public struct HelloOk: Codable, Sendable {
     public let features: [String: AnyCodable]
     public let snapshot: Snapshot
     public let controluiurl: String?
-    public let controluitabs: [[String: AnyCodable]]?
-    public let controluiwidgetkinds: [[String: AnyCodable]]?
+    public let controluitabs: [ControlUiPluginTab]?
+    public let controluiwidgetkinds: [ControlUiPluginWidgetKind]?
     public let pluginsurfaceurls: [String: AnyCodable]?
     public let auth: [String: AnyCodable]
     public let policy: [String: AnyCodable]
@@ -1422,8 +1422,8 @@ public struct HelloOk: Codable, Sendable {
         features: [String: AnyCodable],
         snapshot: Snapshot,
         controluiurl: String? = nil,
-        controluitabs: [[String: AnyCodable]]? = nil,
-        controluiwidgetkinds: [[String: AnyCodable]]? = nil,
+        controluitabs: [ControlUiPluginTab]? = nil,
+        controluiwidgetkinds: [ControlUiPluginWidgetKind]? = nil,
         pluginsurfaceurls: [String: AnyCodable]? = nil,
         auth: [String: AnyCodable],
         policy: [String: AnyCodable])
@@ -20965,6 +20965,78 @@ public struct CapabilityConsentErrorDetails: Codable, Sendable {
     }
 }
 
+public struct ControlUiPluginTab: Codable, Sendable {
+    public let pluginid: String
+    public let id: String
+    public let label: String
+    public let description: String?
+    public let icon: String?
+    public let path: String?
+    public let placement: String?
+    public let requiresgatewayauth: Bool?
+    public let group: AnyCodable?
+    public let order: Double?
+
+    public init(
+        pluginid: String,
+        id: String,
+        label: String,
+        description: String? = nil,
+        icon: String? = nil,
+        path: String? = nil,
+        placement: String? = nil,
+        requiresgatewayauth: Bool? = nil,
+        group: AnyCodable? = nil,
+        order: Double? = nil)
+    {
+        self.pluginid = pluginid
+        self.id = id
+        self.label = label
+        self.description = description
+        self.icon = icon
+        self.path = path
+        self.placement = placement
+        self.requiresgatewayauth = requiresgatewayauth
+        self.group = group
+        self.order = order
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case pluginid = "pluginId"
+        case id
+        case label
+        case description
+        case icon
+        case path
+        case placement
+        case requiresgatewayauth = "requiresGatewayAuth"
+        case group
+        case order
+    }
+}
+
+public struct ControlUiPluginWidgetKind: Codable, Sendable {
+    public let pluginid: String
+    public let kind: String
+    public let label: String
+
+    public init(
+        pluginid: String,
+        kind: String,
+        label: String)
+    {
+        self.pluginid = pluginid
+        self.kind = kind
+        self.label = label
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case pluginid = "pluginId"
+        case kind
+        case label
+    }
+}
+
 public struct HooksStatusParams: Codable, Sendable {
     public let agentid: String?
 
@@ -21116,6 +21188,7 @@ public struct PluginCatalogEntry: Codable, Sendable {
     public let hasicon: Bool?
     public let install: PluginCatalogInstallAction?
     public let error: String?
+    public let runtime: PluginRuntimeStatus?
     public let category: String?
     public let removable: Bool?
 
@@ -21136,6 +21209,7 @@ public struct PluginCatalogEntry: Codable, Sendable {
         hasicon: Bool? = nil,
         install: PluginCatalogInstallAction? = nil,
         error: String? = nil,
+        runtime: PluginRuntimeStatus? = nil,
         category: String? = nil,
         removable: Bool? = nil)
     {
@@ -21155,6 +21229,7 @@ public struct PluginCatalogEntry: Codable, Sendable {
         self.hasicon = hasicon
         self.install = install
         self.error = error
+        self.runtime = runtime
         self.category = category
         self.removable = removable
     }
@@ -21176,6 +21251,7 @@ public struct PluginCatalogEntry: Codable, Sendable {
         case hasicon = "hasIcon"
         case install
         case error
+        case runtime
         case category
         case removable
     }
@@ -21206,7 +21282,11 @@ public struct PluginControlUiDescriptor: Codable, Sendable {
     public let surface: AnyCodable
     public let label: String
     public let description: String?
+    public let icon: String?
+    public let path: String?
     public let placement: String?
+    public let group: AnyCodable?
+    public let order: Double?
     public let schema: AnyCodable?
     public let requiredscopes: [String]?
 
@@ -21217,7 +21297,11 @@ public struct PluginControlUiDescriptor: Codable, Sendable {
         surface: AnyCodable,
         label: String,
         description: String? = nil,
+        icon: String? = nil,
+        path: String? = nil,
         placement: String? = nil,
+        group: AnyCodable? = nil,
+        order: Double? = nil,
         schema: AnyCodable? = nil,
         requiredscopes: [String]? = nil)
     {
@@ -21227,7 +21311,11 @@ public struct PluginControlUiDescriptor: Codable, Sendable {
         self.surface = surface
         self.label = label
         self.description = description
+        self.icon = icon
+        self.path = path
         self.placement = placement
+        self.group = group
+        self.order = order
         self.schema = schema
         self.requiredscopes = requiredscopes
     }
@@ -21239,7 +21327,11 @@ public struct PluginControlUiDescriptor: Codable, Sendable {
         case surface
         case label
         case description
+        case icon
+        case path
         case placement
+        case group
+        case order
         case schema
         case requiredscopes = "requiredScopes"
     }
@@ -21438,6 +21530,45 @@ public struct PluginOperatorGrants: Codable, Sendable {
     }
 }
 
+public struct PluginRuntimeApplication: Codable, Sendable {
+    public let operationid: String
+    public let generation: Int
+    public let pluginids: [String]
+    public let sourcedigests: [String: AnyCodable]?
+
+    public init(
+        operationid: String,
+        generation: Int,
+        pluginids: [String],
+        sourcedigests: [String: AnyCodable]? = nil)
+    {
+        self.operationid = operationid
+        self.generation = generation
+        self.pluginids = pluginids
+        self.sourcedigests = sourcedigests
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case operationid = "operationId"
+        case generation
+        case pluginids = "pluginIds"
+        case sourcedigests = "sourceDigests"
+    }
+}
+
+public struct PluginRuntimeStatus: Codable, Sendable {
+    public let state: AnyCodable
+    public let error: String?
+
+    public init(
+        state: AnyCodable,
+        error: String? = nil)
+    {
+        self.state = state
+        self.error = error
+    }
+}
+
 public struct PluginSearchPackage: Codable, Sendable {
     public let name: String
     public let displayname: String
@@ -21557,17 +21688,20 @@ public struct PluginsInstallResult: Codable, Sendable {
     public let ok: Bool
     public let plugin: PluginCatalogEntry
     public let restartrequired: Bool
+    public let runtime: PluginRuntimeApplication?
     public let warnings: [String]?
 
     public init(
         ok: Bool,
         plugin: PluginCatalogEntry,
         restartrequired: Bool,
+        runtime: PluginRuntimeApplication? = nil,
         warnings: [String]? = nil)
     {
         self.ok = ok
         self.plugin = plugin
         self.restartrequired = restartrequired
+        self.runtime = runtime
         self.warnings = warnings
     }
 
@@ -21575,6 +21709,7 @@ public struct PluginsInstallResult: Codable, Sendable {
         case ok
         case plugin
         case restartrequired = "restartRequired"
+        case runtime
         case warnings
     }
 }
@@ -21582,21 +21717,25 @@ public struct PluginsInstallResult: Codable, Sendable {
 public struct PluginsListParams: Codable, Sendable {}
 
 public struct PluginsListResult: Codable, Sendable {
+    public let generation: Int?
     public let plugins: [PluginCatalogEntry]
     public let diagnostics: [AnyCodable]
     public let mutationallowed: Bool
 
     public init(
+        generation: Int? = nil,
         plugins: [PluginCatalogEntry],
         diagnostics: [AnyCodable],
         mutationallowed: Bool)
     {
+        self.generation = generation
         self.plugins = plugins
         self.diagnostics = diagnostics
         self.mutationallowed = mutationallowed
     }
 
     private enum CodingKeys: String, CodingKey {
+        case generation
         case plugins
         case diagnostics
         case mutationallowed = "mutationAllowed"
@@ -21607,11 +21746,77 @@ public struct PluginsRefreshParams: Codable, Sendable {}
 
 public struct PluginsRefreshResult: Codable, Sendable {
     public let ok: Bool
+    public let restartrequired: Bool?
+    public let runtime: PluginRuntimeApplication?
 
     public init(
-        ok: Bool)
+        ok: Bool,
+        restartrequired: Bool? = nil,
+        runtime: PluginRuntimeApplication? = nil)
     {
         self.ok = ok
+        self.restartrequired = restartrequired
+        self.runtime = runtime
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case ok
+        case restartrequired = "restartRequired"
+        case runtime
+    }
+}
+
+public struct PluginsReloadParams: Codable, Sendable {
+    public let pluginid: String
+    public let acknowledgecapabilities: [String: AnyCodable]?
+
+    public init(
+        pluginid: String,
+        acknowledgecapabilities: [String: AnyCodable]? = nil)
+    {
+        self.pluginid = pluginid
+        self.acknowledgecapabilities = acknowledgecapabilities
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case pluginid = "pluginId"
+        case acknowledgecapabilities = "acknowledgeCapabilities"
+    }
+}
+
+public struct PluginsReloadResult: Codable, Sendable {
+    public let ok: Bool
+    public let pluginid: String
+    public let restartrequired: Bool
+    public let runtime: PluginRuntimeApplication?
+
+    public init(
+        ok: Bool,
+        pluginid: String,
+        restartrequired: Bool,
+        runtime: PluginRuntimeApplication? = nil)
+    {
+        self.ok = ok
+        self.pluginid = pluginid
+        self.restartrequired = restartrequired
+        self.runtime = runtime
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case ok
+        case pluginid = "pluginId"
+        case restartrequired = "restartRequired"
+        case runtime
+    }
+}
+
+public struct PluginsChangedEvent: Codable, Sendable {
+    public let generation: Int
+
+    public init(
+        generation: Int)
+    {
+        self.generation = generation
     }
 }
 
@@ -21818,17 +22023,20 @@ public struct PluginsSetEnabledResult: Codable, Sendable {
     public let ok: Bool
     public let plugin: PluginCatalogEntry
     public let restartrequired: Bool
+    public let runtime: PluginRuntimeApplication?
     public let warnings: [String]?
 
     public init(
         ok: Bool,
         plugin: PluginCatalogEntry,
         restartrequired: Bool,
+        runtime: PluginRuntimeApplication? = nil,
         warnings: [String]? = nil)
     {
         self.ok = ok
         self.plugin = plugin
         self.restartrequired = restartrequired
+        self.runtime = runtime
         self.warnings = warnings
     }
 
@@ -21836,6 +22044,7 @@ public struct PluginsSetEnabledResult: Codable, Sendable {
         case ok
         case plugin
         case restartrequired = "restartRequired"
+        case runtime
         case warnings
     }
 }
@@ -21845,27 +22054,60 @@ public struct PluginsUiDescriptorsParams: Codable, Sendable {}
 public struct PluginsUiDescriptorsResult: Codable, Sendable {
     public let ok: Bool
     public let descriptors: [PluginControlUiDescriptor]
+    public let generation: Int?
+    public let methods: [String]?
+    public let controluitabs: [ControlUiPluginTab]?
+    public let controluiwidgetkinds: [ControlUiPluginWidgetKind]?
+    public let pluginsurfaceurls: [String: AnyCodable]?
 
     public init(
         ok: Bool,
-        descriptors: [PluginControlUiDescriptor])
+        descriptors: [PluginControlUiDescriptor],
+        generation: Int? = nil,
+        methods: [String]? = nil,
+        controluitabs: [ControlUiPluginTab]? = nil,
+        controluiwidgetkinds: [ControlUiPluginWidgetKind]? = nil,
+        pluginsurfaceurls: [String: AnyCodable]? = nil)
     {
         self.ok = ok
         self.descriptors = descriptors
+        self.generation = generation
+        self.methods = methods
+        self.controluitabs = controluitabs
+        self.controluiwidgetkinds = controluiwidgetkinds
+        self.pluginsurfaceurls = pluginsurfaceurls
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case ok
+        case descriptors
+        case generation
+        case methods
+        case controluitabs = "controlUiTabs"
+        case controluiwidgetkinds = "controlUiWidgetKinds"
+        case pluginsurfaceurls = "pluginSurfaceUrls"
     }
 }
 
 public struct PluginsUninstallParams: Codable, Sendable {
     public let pluginid: String
+    public let keepfiles: Bool?
+    public let clawmanaged: Bool?
 
     public init(
-        pluginid: String)
+        pluginid: String,
+        keepfiles: Bool? = nil,
+        clawmanaged: Bool? = nil)
     {
         self.pluginid = pluginid
+        self.keepfiles = keepfiles
+        self.clawmanaged = clawmanaged
     }
 
     private enum CodingKeys: String, CodingKey {
         case pluginid = "pluginId"
+        case keepfiles = "keepFiles"
+        case clawmanaged = "clawManaged"
     }
 }
 
@@ -21873,6 +22115,7 @@ public struct PluginsUninstallResult: Codable, Sendable {
     public let ok: Bool
     public let pluginid: String
     public let restartrequired: Bool
+    public let runtime: PluginRuntimeApplication?
     public let removed: [String]
     public let warnings: [String]?
 
@@ -21880,12 +22123,14 @@ public struct PluginsUninstallResult: Codable, Sendable {
         ok: Bool,
         pluginid: String,
         restartrequired: Bool,
+        runtime: PluginRuntimeApplication? = nil,
         removed: [String],
         warnings: [String]? = nil)
     {
         self.ok = ok
         self.pluginid = pluginid
         self.restartrequired = restartrequired
+        self.runtime = runtime
         self.removed = removed
         self.warnings = warnings
     }
@@ -21894,6 +22139,7 @@ public struct PluginsUninstallResult: Codable, Sendable {
         case ok
         case pluginid = "pluginId"
         case restartrequired = "restartRequired"
+        case runtime
         case removed
         case warnings
     }
@@ -27151,39 +27397,55 @@ public enum PluginCatalogInstallAction: Codable, Sendable {
 }
 
 public struct PluginsInstallParamsClawhub: Codable, Sendable {
+    public let clawmanaged: Bool?
+    public let mode: AnyCodable?
+    public let acknowledgeinstallpolicywarning: Bool?
+    public let acknowledgecapabilities: [String: AnyCodable]?
     public let source: String
     public let packagename: String
     public let version: String?
-    public let acknowledgeinstallpolicywarning: Bool?
-    public let acknowledgecapabilities: [String: AnyCodable]?
+    public let expectedpluginid: String?
+    public let expectedintegrity: String?
 
     public init(
+        clawmanaged: Bool? = nil,
+        mode: AnyCodable? = nil,
+        acknowledgeinstallpolicywarning: Bool? = nil,
+        acknowledgecapabilities: [String: AnyCodable]? = nil,
         packagename: String,
         version: String? = nil,
-        acknowledgeinstallpolicywarning: Bool? = nil,
-        acknowledgecapabilities: [String: AnyCodable]? = nil
+        expectedpluginid: String? = nil,
+        expectedintegrity: String? = nil
     )
     {
+        self.clawmanaged = clawmanaged
+        self.mode = mode
+        self.acknowledgeinstallpolicywarning = acknowledgeinstallpolicywarning
+        self.acknowledgecapabilities = acknowledgecapabilities
         self.source = "clawhub"
         self.packagename = packagename
         self.version = version
-        self.acknowledgeinstallpolicywarning = acknowledgeinstallpolicywarning
-        self.acknowledgecapabilities = acknowledgecapabilities
+        self.expectedpluginid = expectedpluginid
+        self.expectedintegrity = expectedintegrity
     }
 
     private enum CodingKeys: String, CodingKey {
+        case clawmanaged = "clawManaged"
+        case mode
+        case acknowledgeinstallpolicywarning = "acknowledgeInstallPolicyWarning"
+        case acknowledgecapabilities = "acknowledgeCapabilities"
         case source
         case packagename = "packageName"
         case version
-        case acknowledgeinstallpolicywarning = "acknowledgeInstallPolicyWarning"
-        case acknowledgecapabilities = "acknowledgeCapabilities"
+        case expectedpluginid = "expectedPluginId"
+        case expectedintegrity = "expectedIntegrity"
     }
 
     public init(from decoder: Decoder) throws {
         let rawContainer = try decoder.container(keyedBy: GatewayAnyCodingKey.self)
         let unexpectedKeys = rawContainer.allKeys
             .map(\.stringValue)
-            .filter { !Set(["source", "packageName", "version", "acknowledgeInstallPolicyWarning", "acknowledgeCapabilities"]).contains($0) }
+            .filter { !Set(["clawManaged", "mode", "acknowledgeInstallPolicyWarning", "acknowledgeCapabilities", "source", "packageName", "version", "expectedPluginId", "expectedIntegrity"]).contains($0) }
         if !unexpectedKeys.isEmpty {
             throw DecodingError.dataCorrupted(
                 .init(
@@ -27193,6 +27455,20 @@ public struct PluginsInstallParamsClawhub: Codable, Sendable {
             )
         }
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.clawmanaged = try container.decodeIfPresent(Bool.self, forKey: .clawmanaged)
+        self.mode = try container.decodeIfPresent(AnyCodable.self, forKey: .mode)
+        let decodedAcknowledgeinstallpolicywarning = container.contains(.acknowledgeinstallpolicywarning)
+            ? try container.decode(Bool.self, forKey: .acknowledgeinstallpolicywarning)
+            : nil
+        guard decodedAcknowledgeinstallpolicywarning == nil || decodedAcknowledgeinstallpolicywarning == true else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .acknowledgeinstallpolicywarning,
+                in: container,
+                debugDescription: "Expected acknowledgeInstallPolicyWarning to equal true"
+            )
+        }
+        self.acknowledgeinstallpolicywarning = decodedAcknowledgeinstallpolicywarning
+        self.acknowledgecapabilities = try container.decodeIfPresent([String: AnyCodable].self, forKey: .acknowledgecapabilities)
         let decodedSource = try container.decode(String.self, forKey: .source)
         guard decodedSource == "clawhub" else {
             throw DecodingError.dataCorruptedError(
@@ -27204,6 +27480,90 @@ public struct PluginsInstallParamsClawhub: Codable, Sendable {
         self.source = "clawhub"
         self.packagename = try container.decode(String.self, forKey: .packagename)
         self.version = try container.decodeIfPresent(String.self, forKey: .version)
+        self.expectedpluginid = try container.decodeIfPresent(String.self, forKey: .expectedpluginid)
+        self.expectedintegrity = try container.decodeIfPresent(String.self, forKey: .expectedintegrity)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(clawmanaged, forKey: .clawmanaged)
+        try container.encodeIfPresent(mode, forKey: .mode)
+        if let acknowledgeinstallpolicywarning, acknowledgeinstallpolicywarning != true {
+            throw EncodingError.invalidValue(
+                acknowledgeinstallpolicywarning,
+                .init(
+                    codingPath: container.codingPath + [CodingKeys.acknowledgeinstallpolicywarning],
+                    debugDescription: "Expected acknowledgeInstallPolicyWarning to equal true"
+                )
+            )
+        }
+        try container.encodeIfPresent(acknowledgeinstallpolicywarning, forKey: .acknowledgeinstallpolicywarning)
+        try container.encodeIfPresent(acknowledgecapabilities, forKey: .acknowledgecapabilities)
+        try container.encode("clawhub", forKey: .source)
+        try container.encode(packagename, forKey: .packagename)
+        try container.encodeIfPresent(version, forKey: .version)
+        try container.encodeIfPresent(expectedpluginid, forKey: .expectedpluginid)
+        try container.encodeIfPresent(expectedintegrity, forKey: .expectedintegrity)
+    }
+}
+
+public struct PluginsInstallParamsOfficial: Codable, Sendable {
+    public let clawmanaged: Bool?
+    public let mode: AnyCodable?
+    public let acknowledgeinstallpolicywarning: Bool?
+    public let acknowledgecapabilities: [String: AnyCodable]?
+    public let source: String
+    public let pluginid: String
+    public let version: String?
+    public let pin: Bool?
+
+    public init(
+        clawmanaged: Bool? = nil,
+        mode: AnyCodable? = nil,
+        acknowledgeinstallpolicywarning: Bool? = nil,
+        acknowledgecapabilities: [String: AnyCodable]? = nil,
+        pluginid: String,
+        version: String? = nil,
+        pin: Bool? = nil
+    )
+    {
+        self.clawmanaged = clawmanaged
+        self.mode = mode
+        self.acknowledgeinstallpolicywarning = acknowledgeinstallpolicywarning
+        self.acknowledgecapabilities = acknowledgecapabilities
+        self.source = "official"
+        self.pluginid = pluginid
+        self.version = version
+        self.pin = pin
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case clawmanaged = "clawManaged"
+        case mode
+        case acknowledgeinstallpolicywarning = "acknowledgeInstallPolicyWarning"
+        case acknowledgecapabilities = "acknowledgeCapabilities"
+        case source
+        case pluginid = "pluginId"
+        case version
+        case pin
+    }
+
+    public init(from decoder: Decoder) throws {
+        let rawContainer = try decoder.container(keyedBy: GatewayAnyCodingKey.self)
+        let unexpectedKeys = rawContainer.allKeys
+            .map(\.stringValue)
+            .filter { !Set(["clawManaged", "mode", "acknowledgeInstallPolicyWarning", "acknowledgeCapabilities", "source", "pluginId", "version", "pin"]).contains($0) }
+        if !unexpectedKeys.isEmpty {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: rawContainer.codingPath,
+                    debugDescription: "Unexpected keys for PluginsInstallParamsOfficial: \(unexpectedKeys.sorted().joined(separator: ", "))"
+                )
+            )
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.clawmanaged = try container.decodeIfPresent(Bool.self, forKey: .clawmanaged)
+        self.mode = try container.decodeIfPresent(AnyCodable.self, forKey: .mode)
         let decodedAcknowledgeinstallpolicywarning = container.contains(.acknowledgeinstallpolicywarning)
             ? try container.decode(Bool.self, forKey: .acknowledgeinstallpolicywarning)
             : nil
@@ -27216,66 +27576,6 @@ public struct PluginsInstallParamsClawhub: Codable, Sendable {
         }
         self.acknowledgeinstallpolicywarning = decodedAcknowledgeinstallpolicywarning
         self.acknowledgecapabilities = try container.decodeIfPresent([String: AnyCodable].self, forKey: .acknowledgecapabilities)
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode("clawhub", forKey: .source)
-        try container.encode(packagename, forKey: .packagename)
-        try container.encodeIfPresent(version, forKey: .version)
-        if let acknowledgeinstallpolicywarning, acknowledgeinstallpolicywarning != true {
-            throw EncodingError.invalidValue(
-                acknowledgeinstallpolicywarning,
-                .init(
-                    codingPath: container.codingPath + [CodingKeys.acknowledgeinstallpolicywarning],
-                    debugDescription: "Expected acknowledgeInstallPolicyWarning to equal true"
-                )
-            )
-        }
-        try container.encodeIfPresent(acknowledgeinstallpolicywarning, forKey: .acknowledgeinstallpolicywarning)
-        try container.encodeIfPresent(acknowledgecapabilities, forKey: .acknowledgecapabilities)
-    }
-}
-
-public struct PluginsInstallParamsOfficial: Codable, Sendable {
-    public let source: String
-    public let pluginid: String
-    public let acknowledgeinstallpolicywarning: Bool?
-    public let acknowledgecapabilities: [String: AnyCodable]?
-
-    public init(
-        pluginid: String,
-        acknowledgeinstallpolicywarning: Bool? = nil,
-        acknowledgecapabilities: [String: AnyCodable]? = nil
-    )
-    {
-        self.source = "official"
-        self.pluginid = pluginid
-        self.acknowledgeinstallpolicywarning = acknowledgeinstallpolicywarning
-        self.acknowledgecapabilities = acknowledgecapabilities
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case source
-        case pluginid = "pluginId"
-        case acknowledgeinstallpolicywarning = "acknowledgeInstallPolicyWarning"
-        case acknowledgecapabilities = "acknowledgeCapabilities"
-    }
-
-    public init(from decoder: Decoder) throws {
-        let rawContainer = try decoder.container(keyedBy: GatewayAnyCodingKey.self)
-        let unexpectedKeys = rawContainer.allKeys
-            .map(\.stringValue)
-            .filter { !Set(["source", "pluginId", "acknowledgeInstallPolicyWarning", "acknowledgeCapabilities"]).contains($0) }
-        if !unexpectedKeys.isEmpty {
-            throw DecodingError.dataCorrupted(
-                .init(
-                    codingPath: rawContainer.codingPath,
-                    debugDescription: "Unexpected keys for PluginsInstallParamsOfficial: \(unexpectedKeys.sorted().joined(separator: ", "))"
-                )
-            )
-        }
-        let container = try decoder.container(keyedBy: CodingKeys.self)
         let decodedSource = try container.decode(String.self, forKey: .source)
         guard decodedSource == "official" else {
             throw DecodingError.dataCorruptedError(
@@ -27286,6 +27586,100 @@ public struct PluginsInstallParamsOfficial: Codable, Sendable {
         }
         self.source = "official"
         self.pluginid = try container.decode(String.self, forKey: .pluginid)
+        let decodedVersion = container.contains(.version)
+            ? try container.decode(String.self, forKey: .version)
+            : nil
+        guard decodedVersion == nil || decodedVersion == "latest" else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .version,
+                in: container,
+                debugDescription: "Expected version to equal latest"
+            )
+        }
+        self.version = decodedVersion
+        self.pin = try container.decodeIfPresent(Bool.self, forKey: .pin)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(clawmanaged, forKey: .clawmanaged)
+        try container.encodeIfPresent(mode, forKey: .mode)
+        if let acknowledgeinstallpolicywarning, acknowledgeinstallpolicywarning != true {
+            throw EncodingError.invalidValue(
+                acknowledgeinstallpolicywarning,
+                .init(
+                    codingPath: container.codingPath + [CodingKeys.acknowledgeinstallpolicywarning],
+                    debugDescription: "Expected acknowledgeInstallPolicyWarning to equal true"
+                )
+            )
+        }
+        try container.encodeIfPresent(acknowledgeinstallpolicywarning, forKey: .acknowledgeinstallpolicywarning)
+        try container.encodeIfPresent(acknowledgecapabilities, forKey: .acknowledgecapabilities)
+        try container.encode("official", forKey: .source)
+        try container.encode(pluginid, forKey: .pluginid)
+        if let version, version != "latest" {
+            throw EncodingError.invalidValue(
+                version,
+                .init(
+                    codingPath: container.codingPath + [CodingKeys.version],
+                    debugDescription: "Expected version to equal latest"
+                )
+            )
+        }
+        try container.encodeIfPresent(version, forKey: .version)
+        try container.encodeIfPresent(pin, forKey: .pin)
+    }
+}
+
+public struct PluginsInstallParamsBundled: Codable, Sendable {
+    public let clawmanaged: Bool?
+    public let mode: AnyCodable?
+    public let acknowledgeinstallpolicywarning: Bool?
+    public let acknowledgecapabilities: [String: AnyCodable]?
+    public let source: String
+    public let pluginid: String
+
+    public init(
+        clawmanaged: Bool? = nil,
+        mode: AnyCodable? = nil,
+        acknowledgeinstallpolicywarning: Bool? = nil,
+        acknowledgecapabilities: [String: AnyCodable]? = nil,
+        pluginid: String
+    )
+    {
+        self.clawmanaged = clawmanaged
+        self.mode = mode
+        self.acknowledgeinstallpolicywarning = acknowledgeinstallpolicywarning
+        self.acknowledgecapabilities = acknowledgecapabilities
+        self.source = "bundled"
+        self.pluginid = pluginid
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case clawmanaged = "clawManaged"
+        case mode
+        case acknowledgeinstallpolicywarning = "acknowledgeInstallPolicyWarning"
+        case acknowledgecapabilities = "acknowledgeCapabilities"
+        case source
+        case pluginid = "pluginId"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let rawContainer = try decoder.container(keyedBy: GatewayAnyCodingKey.self)
+        let unexpectedKeys = rawContainer.allKeys
+            .map(\.stringValue)
+            .filter { !Set(["clawManaged", "mode", "acknowledgeInstallPolicyWarning", "acknowledgeCapabilities", "source", "pluginId"]).contains($0) }
+        if !unexpectedKeys.isEmpty {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: rawContainer.codingPath,
+                    debugDescription: "Unexpected keys for PluginsInstallParamsBundled: \(unexpectedKeys.sorted().joined(separator: ", "))"
+                )
+            )
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.clawmanaged = try container.decodeIfPresent(Bool.self, forKey: .clawmanaged)
+        self.mode = try container.decodeIfPresent(AnyCodable.self, forKey: .mode)
         let decodedAcknowledgeinstallpolicywarning = container.contains(.acknowledgeinstallpolicywarning)
             ? try container.decode(Bool.self, forKey: .acknowledgeinstallpolicywarning)
             : nil
@@ -27298,12 +27692,22 @@ public struct PluginsInstallParamsOfficial: Codable, Sendable {
         }
         self.acknowledgeinstallpolicywarning = decodedAcknowledgeinstallpolicywarning
         self.acknowledgecapabilities = try container.decodeIfPresent([String: AnyCodable].self, forKey: .acknowledgecapabilities)
+        let decodedSource = try container.decode(String.self, forKey: .source)
+        guard decodedSource == "bundled" else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .source,
+                in: container,
+                debugDescription: "Expected source to equal bundled"
+            )
+        }
+        self.source = "bundled"
+        self.pluginid = try container.decode(String.self, forKey: .pluginid)
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode("official", forKey: .source)
-        try container.encode(pluginid, forKey: .pluginid)
+        try container.encodeIfPresent(clawmanaged, forKey: .clawmanaged)
+        try container.encodeIfPresent(mode, forKey: .mode)
         if let acknowledgeinstallpolicywarning, acknowledgeinstallpolicywarning != true {
             throw EncodingError.invalidValue(
                 acknowledgeinstallpolicywarning,
@@ -27315,12 +27719,515 @@ public struct PluginsInstallParamsOfficial: Codable, Sendable {
         }
         try container.encodeIfPresent(acknowledgeinstallpolicywarning, forKey: .acknowledgeinstallpolicywarning)
         try container.encodeIfPresent(acknowledgecapabilities, forKey: .acknowledgecapabilities)
+        try container.encode("bundled", forKey: .source)
+        try container.encode(pluginid, forKey: .pluginid)
+    }
+}
+
+public struct PluginsInstallParamsLocal: Codable, Sendable {
+    public let clawmanaged: Bool?
+    public let mode: AnyCodable?
+    public let acknowledgeinstallpolicywarning: Bool?
+    public let acknowledgecapabilities: [String: AnyCodable]?
+    public let source: String
+    public let path: String
+    public let link: Bool?
+
+    public init(
+        clawmanaged: Bool? = nil,
+        mode: AnyCodable? = nil,
+        acknowledgeinstallpolicywarning: Bool? = nil,
+        acknowledgecapabilities: [String: AnyCodable]? = nil,
+        path: String,
+        link: Bool? = nil
+    )
+    {
+        self.clawmanaged = clawmanaged
+        self.mode = mode
+        self.acknowledgeinstallpolicywarning = acknowledgeinstallpolicywarning
+        self.acknowledgecapabilities = acknowledgecapabilities
+        self.source = "local"
+        self.path = path
+        self.link = link
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case clawmanaged = "clawManaged"
+        case mode
+        case acknowledgeinstallpolicywarning = "acknowledgeInstallPolicyWarning"
+        case acknowledgecapabilities = "acknowledgeCapabilities"
+        case source
+        case path
+        case link
+    }
+
+    public init(from decoder: Decoder) throws {
+        let rawContainer = try decoder.container(keyedBy: GatewayAnyCodingKey.self)
+        let unexpectedKeys = rawContainer.allKeys
+            .map(\.stringValue)
+            .filter { !Set(["clawManaged", "mode", "acknowledgeInstallPolicyWarning", "acknowledgeCapabilities", "source", "path", "link"]).contains($0) }
+        if !unexpectedKeys.isEmpty {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: rawContainer.codingPath,
+                    debugDescription: "Unexpected keys for PluginsInstallParamsLocal: \(unexpectedKeys.sorted().joined(separator: ", "))"
+                )
+            )
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.clawmanaged = try container.decodeIfPresent(Bool.self, forKey: .clawmanaged)
+        self.mode = try container.decodeIfPresent(AnyCodable.self, forKey: .mode)
+        let decodedAcknowledgeinstallpolicywarning = container.contains(.acknowledgeinstallpolicywarning)
+            ? try container.decode(Bool.self, forKey: .acknowledgeinstallpolicywarning)
+            : nil
+        guard decodedAcknowledgeinstallpolicywarning == nil || decodedAcknowledgeinstallpolicywarning == true else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .acknowledgeinstallpolicywarning,
+                in: container,
+                debugDescription: "Expected acknowledgeInstallPolicyWarning to equal true"
+            )
+        }
+        self.acknowledgeinstallpolicywarning = decodedAcknowledgeinstallpolicywarning
+        self.acknowledgecapabilities = try container.decodeIfPresent([String: AnyCodable].self, forKey: .acknowledgecapabilities)
+        let decodedSource = try container.decode(String.self, forKey: .source)
+        guard decodedSource == "local" else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .source,
+                in: container,
+                debugDescription: "Expected source to equal local"
+            )
+        }
+        self.source = "local"
+        self.path = try container.decode(String.self, forKey: .path)
+        self.link = try container.decodeIfPresent(Bool.self, forKey: .link)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(clawmanaged, forKey: .clawmanaged)
+        try container.encodeIfPresent(mode, forKey: .mode)
+        if let acknowledgeinstallpolicywarning, acknowledgeinstallpolicywarning != true {
+            throw EncodingError.invalidValue(
+                acknowledgeinstallpolicywarning,
+                .init(
+                    codingPath: container.codingPath + [CodingKeys.acknowledgeinstallpolicywarning],
+                    debugDescription: "Expected acknowledgeInstallPolicyWarning to equal true"
+                )
+            )
+        }
+        try container.encodeIfPresent(acknowledgeinstallpolicywarning, forKey: .acknowledgeinstallpolicywarning)
+        try container.encodeIfPresent(acknowledgecapabilities, forKey: .acknowledgecapabilities)
+        try container.encode("local", forKey: .source)
+        try container.encode(path, forKey: .path)
+        try container.encodeIfPresent(link, forKey: .link)
+    }
+}
+
+public struct PluginsInstallParamsNpm: Codable, Sendable {
+    public let clawmanaged: Bool?
+    public let mode: AnyCodable?
+    public let acknowledgeinstallpolicywarning: Bool?
+    public let acknowledgecapabilities: [String: AnyCodable]?
+    public let source: String
+    public let spec: String
+    public let pin: Bool?
+    public let expectedpluginid: String?
+    public let expectedintegrity: String?
+
+    public init(
+        clawmanaged: Bool? = nil,
+        mode: AnyCodable? = nil,
+        acknowledgeinstallpolicywarning: Bool? = nil,
+        acknowledgecapabilities: [String: AnyCodable]? = nil,
+        spec: String,
+        pin: Bool? = nil,
+        expectedpluginid: String? = nil,
+        expectedintegrity: String? = nil
+    )
+    {
+        self.clawmanaged = clawmanaged
+        self.mode = mode
+        self.acknowledgeinstallpolicywarning = acknowledgeinstallpolicywarning
+        self.acknowledgecapabilities = acknowledgecapabilities
+        self.source = "npm"
+        self.spec = spec
+        self.pin = pin
+        self.expectedpluginid = expectedpluginid
+        self.expectedintegrity = expectedintegrity
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case clawmanaged = "clawManaged"
+        case mode
+        case acknowledgeinstallpolicywarning = "acknowledgeInstallPolicyWarning"
+        case acknowledgecapabilities = "acknowledgeCapabilities"
+        case source
+        case spec
+        case pin
+        case expectedpluginid = "expectedPluginId"
+        case expectedintegrity = "expectedIntegrity"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let rawContainer = try decoder.container(keyedBy: GatewayAnyCodingKey.self)
+        let unexpectedKeys = rawContainer.allKeys
+            .map(\.stringValue)
+            .filter { !Set(["clawManaged", "mode", "acknowledgeInstallPolicyWarning", "acknowledgeCapabilities", "source", "spec", "pin", "expectedPluginId", "expectedIntegrity"]).contains($0) }
+        if !unexpectedKeys.isEmpty {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: rawContainer.codingPath,
+                    debugDescription: "Unexpected keys for PluginsInstallParamsNpm: \(unexpectedKeys.sorted().joined(separator: ", "))"
+                )
+            )
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.clawmanaged = try container.decodeIfPresent(Bool.self, forKey: .clawmanaged)
+        self.mode = try container.decodeIfPresent(AnyCodable.self, forKey: .mode)
+        let decodedAcknowledgeinstallpolicywarning = container.contains(.acknowledgeinstallpolicywarning)
+            ? try container.decode(Bool.self, forKey: .acknowledgeinstallpolicywarning)
+            : nil
+        guard decodedAcknowledgeinstallpolicywarning == nil || decodedAcknowledgeinstallpolicywarning == true else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .acknowledgeinstallpolicywarning,
+                in: container,
+                debugDescription: "Expected acknowledgeInstallPolicyWarning to equal true"
+            )
+        }
+        self.acknowledgeinstallpolicywarning = decodedAcknowledgeinstallpolicywarning
+        self.acknowledgecapabilities = try container.decodeIfPresent([String: AnyCodable].self, forKey: .acknowledgecapabilities)
+        let decodedSource = try container.decode(String.self, forKey: .source)
+        guard decodedSource == "npm" else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .source,
+                in: container,
+                debugDescription: "Expected source to equal npm"
+            )
+        }
+        self.source = "npm"
+        self.spec = try container.decode(String.self, forKey: .spec)
+        self.pin = try container.decodeIfPresent(Bool.self, forKey: .pin)
+        self.expectedpluginid = try container.decodeIfPresent(String.self, forKey: .expectedpluginid)
+        self.expectedintegrity = try container.decodeIfPresent(String.self, forKey: .expectedintegrity)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(clawmanaged, forKey: .clawmanaged)
+        try container.encodeIfPresent(mode, forKey: .mode)
+        if let acknowledgeinstallpolicywarning, acknowledgeinstallpolicywarning != true {
+            throw EncodingError.invalidValue(
+                acknowledgeinstallpolicywarning,
+                .init(
+                    codingPath: container.codingPath + [CodingKeys.acknowledgeinstallpolicywarning],
+                    debugDescription: "Expected acknowledgeInstallPolicyWarning to equal true"
+                )
+            )
+        }
+        try container.encodeIfPresent(acknowledgeinstallpolicywarning, forKey: .acknowledgeinstallpolicywarning)
+        try container.encodeIfPresent(acknowledgecapabilities, forKey: .acknowledgecapabilities)
+        try container.encode("npm", forKey: .source)
+        try container.encode(spec, forKey: .spec)
+        try container.encodeIfPresent(pin, forKey: .pin)
+        try container.encodeIfPresent(expectedpluginid, forKey: .expectedpluginid)
+        try container.encodeIfPresent(expectedintegrity, forKey: .expectedintegrity)
+    }
+}
+
+public struct PluginsInstallParamsGit: Codable, Sendable {
+    public let clawmanaged: Bool?
+    public let mode: AnyCodable?
+    public let acknowledgeinstallpolicywarning: Bool?
+    public let acknowledgecapabilities: [String: AnyCodable]?
+    public let source: String
+    public let spec: String
+
+    public init(
+        clawmanaged: Bool? = nil,
+        mode: AnyCodable? = nil,
+        acknowledgeinstallpolicywarning: Bool? = nil,
+        acknowledgecapabilities: [String: AnyCodable]? = nil,
+        spec: String
+    )
+    {
+        self.clawmanaged = clawmanaged
+        self.mode = mode
+        self.acknowledgeinstallpolicywarning = acknowledgeinstallpolicywarning
+        self.acknowledgecapabilities = acknowledgecapabilities
+        self.source = "git"
+        self.spec = spec
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case clawmanaged = "clawManaged"
+        case mode
+        case acknowledgeinstallpolicywarning = "acknowledgeInstallPolicyWarning"
+        case acknowledgecapabilities = "acknowledgeCapabilities"
+        case source
+        case spec
+    }
+
+    public init(from decoder: Decoder) throws {
+        let rawContainer = try decoder.container(keyedBy: GatewayAnyCodingKey.self)
+        let unexpectedKeys = rawContainer.allKeys
+            .map(\.stringValue)
+            .filter { !Set(["clawManaged", "mode", "acknowledgeInstallPolicyWarning", "acknowledgeCapabilities", "source", "spec"]).contains($0) }
+        if !unexpectedKeys.isEmpty {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: rawContainer.codingPath,
+                    debugDescription: "Unexpected keys for PluginsInstallParamsGit: \(unexpectedKeys.sorted().joined(separator: ", "))"
+                )
+            )
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.clawmanaged = try container.decodeIfPresent(Bool.self, forKey: .clawmanaged)
+        self.mode = try container.decodeIfPresent(AnyCodable.self, forKey: .mode)
+        let decodedAcknowledgeinstallpolicywarning = container.contains(.acknowledgeinstallpolicywarning)
+            ? try container.decode(Bool.self, forKey: .acknowledgeinstallpolicywarning)
+            : nil
+        guard decodedAcknowledgeinstallpolicywarning == nil || decodedAcknowledgeinstallpolicywarning == true else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .acknowledgeinstallpolicywarning,
+                in: container,
+                debugDescription: "Expected acknowledgeInstallPolicyWarning to equal true"
+            )
+        }
+        self.acknowledgeinstallpolicywarning = decodedAcknowledgeinstallpolicywarning
+        self.acknowledgecapabilities = try container.decodeIfPresent([String: AnyCodable].self, forKey: .acknowledgecapabilities)
+        let decodedSource = try container.decode(String.self, forKey: .source)
+        guard decodedSource == "git" else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .source,
+                in: container,
+                debugDescription: "Expected source to equal git"
+            )
+        }
+        self.source = "git"
+        self.spec = try container.decode(String.self, forKey: .spec)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(clawmanaged, forKey: .clawmanaged)
+        try container.encodeIfPresent(mode, forKey: .mode)
+        if let acknowledgeinstallpolicywarning, acknowledgeinstallpolicywarning != true {
+            throw EncodingError.invalidValue(
+                acknowledgeinstallpolicywarning,
+                .init(
+                    codingPath: container.codingPath + [CodingKeys.acknowledgeinstallpolicywarning],
+                    debugDescription: "Expected acknowledgeInstallPolicyWarning to equal true"
+                )
+            )
+        }
+        try container.encodeIfPresent(acknowledgeinstallpolicywarning, forKey: .acknowledgeinstallpolicywarning)
+        try container.encodeIfPresent(acknowledgecapabilities, forKey: .acknowledgecapabilities)
+        try container.encode("git", forKey: .source)
+        try container.encode(spec, forKey: .spec)
+    }
+}
+
+public struct PluginsInstallParamsNpmPack: Codable, Sendable {
+    public let clawmanaged: Bool?
+    public let mode: AnyCodable?
+    public let acknowledgeinstallpolicywarning: Bool?
+    public let acknowledgecapabilities: [String: AnyCodable]?
+    public let source: String
+    public let archivepath: String
+
+    public init(
+        clawmanaged: Bool? = nil,
+        mode: AnyCodable? = nil,
+        acknowledgeinstallpolicywarning: Bool? = nil,
+        acknowledgecapabilities: [String: AnyCodable]? = nil,
+        archivepath: String
+    )
+    {
+        self.clawmanaged = clawmanaged
+        self.mode = mode
+        self.acknowledgeinstallpolicywarning = acknowledgeinstallpolicywarning
+        self.acknowledgecapabilities = acknowledgecapabilities
+        self.source = "npm-pack"
+        self.archivepath = archivepath
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case clawmanaged = "clawManaged"
+        case mode
+        case acknowledgeinstallpolicywarning = "acknowledgeInstallPolicyWarning"
+        case acknowledgecapabilities = "acknowledgeCapabilities"
+        case source
+        case archivepath = "archivePath"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let rawContainer = try decoder.container(keyedBy: GatewayAnyCodingKey.self)
+        let unexpectedKeys = rawContainer.allKeys
+            .map(\.stringValue)
+            .filter { !Set(["clawManaged", "mode", "acknowledgeInstallPolicyWarning", "acknowledgeCapabilities", "source", "archivePath"]).contains($0) }
+        if !unexpectedKeys.isEmpty {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: rawContainer.codingPath,
+                    debugDescription: "Unexpected keys for PluginsInstallParamsNpmPack: \(unexpectedKeys.sorted().joined(separator: ", "))"
+                )
+            )
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.clawmanaged = try container.decodeIfPresent(Bool.self, forKey: .clawmanaged)
+        self.mode = try container.decodeIfPresent(AnyCodable.self, forKey: .mode)
+        let decodedAcknowledgeinstallpolicywarning = container.contains(.acknowledgeinstallpolicywarning)
+            ? try container.decode(Bool.self, forKey: .acknowledgeinstallpolicywarning)
+            : nil
+        guard decodedAcknowledgeinstallpolicywarning == nil || decodedAcknowledgeinstallpolicywarning == true else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .acknowledgeinstallpolicywarning,
+                in: container,
+                debugDescription: "Expected acknowledgeInstallPolicyWarning to equal true"
+            )
+        }
+        self.acknowledgeinstallpolicywarning = decodedAcknowledgeinstallpolicywarning
+        self.acknowledgecapabilities = try container.decodeIfPresent([String: AnyCodable].self, forKey: .acknowledgecapabilities)
+        let decodedSource = try container.decode(String.self, forKey: .source)
+        guard decodedSource == "npm-pack" else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .source,
+                in: container,
+                debugDescription: "Expected source to equal npm-pack"
+            )
+        }
+        self.source = "npm-pack"
+        self.archivepath = try container.decode(String.self, forKey: .archivepath)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(clawmanaged, forKey: .clawmanaged)
+        try container.encodeIfPresent(mode, forKey: .mode)
+        if let acknowledgeinstallpolicywarning, acknowledgeinstallpolicywarning != true {
+            throw EncodingError.invalidValue(
+                acknowledgeinstallpolicywarning,
+                .init(
+                    codingPath: container.codingPath + [CodingKeys.acknowledgeinstallpolicywarning],
+                    debugDescription: "Expected acknowledgeInstallPolicyWarning to equal true"
+                )
+            )
+        }
+        try container.encodeIfPresent(acknowledgeinstallpolicywarning, forKey: .acknowledgeinstallpolicywarning)
+        try container.encodeIfPresent(acknowledgecapabilities, forKey: .acknowledgecapabilities)
+        try container.encode("npm-pack", forKey: .source)
+        try container.encode(archivepath, forKey: .archivepath)
+    }
+}
+
+public struct PluginsInstallParamsMarketplace: Codable, Sendable {
+    public let clawmanaged: Bool?
+    public let mode: AnyCodable?
+    public let acknowledgeinstallpolicywarning: Bool?
+    public let acknowledgecapabilities: [String: AnyCodable]?
+    public let source: String
+    public let marketplace: String
+    public let plugin: String
+
+    public init(
+        clawmanaged: Bool? = nil,
+        mode: AnyCodable? = nil,
+        acknowledgeinstallpolicywarning: Bool? = nil,
+        acknowledgecapabilities: [String: AnyCodable]? = nil,
+        marketplace: String,
+        plugin: String
+    )
+    {
+        self.clawmanaged = clawmanaged
+        self.mode = mode
+        self.acknowledgeinstallpolicywarning = acknowledgeinstallpolicywarning
+        self.acknowledgecapabilities = acknowledgecapabilities
+        self.source = "marketplace"
+        self.marketplace = marketplace
+        self.plugin = plugin
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case clawmanaged = "clawManaged"
+        case mode
+        case acknowledgeinstallpolicywarning = "acknowledgeInstallPolicyWarning"
+        case acknowledgecapabilities = "acknowledgeCapabilities"
+        case source
+        case marketplace
+        case plugin
+    }
+
+    public init(from decoder: Decoder) throws {
+        let rawContainer = try decoder.container(keyedBy: GatewayAnyCodingKey.self)
+        let unexpectedKeys = rawContainer.allKeys
+            .map(\.stringValue)
+            .filter { !Set(["clawManaged", "mode", "acknowledgeInstallPolicyWarning", "acknowledgeCapabilities", "source", "marketplace", "plugin"]).contains($0) }
+        if !unexpectedKeys.isEmpty {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: rawContainer.codingPath,
+                    debugDescription: "Unexpected keys for PluginsInstallParamsMarketplace: \(unexpectedKeys.sorted().joined(separator: ", "))"
+                )
+            )
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.clawmanaged = try container.decodeIfPresent(Bool.self, forKey: .clawmanaged)
+        self.mode = try container.decodeIfPresent(AnyCodable.self, forKey: .mode)
+        let decodedAcknowledgeinstallpolicywarning = container.contains(.acknowledgeinstallpolicywarning)
+            ? try container.decode(Bool.self, forKey: .acknowledgeinstallpolicywarning)
+            : nil
+        guard decodedAcknowledgeinstallpolicywarning == nil || decodedAcknowledgeinstallpolicywarning == true else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .acknowledgeinstallpolicywarning,
+                in: container,
+                debugDescription: "Expected acknowledgeInstallPolicyWarning to equal true"
+            )
+        }
+        self.acknowledgeinstallpolicywarning = decodedAcknowledgeinstallpolicywarning
+        self.acknowledgecapabilities = try container.decodeIfPresent([String: AnyCodable].self, forKey: .acknowledgecapabilities)
+        let decodedSource = try container.decode(String.self, forKey: .source)
+        guard decodedSource == "marketplace" else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .source,
+                in: container,
+                debugDescription: "Expected source to equal marketplace"
+            )
+        }
+        self.source = "marketplace"
+        self.marketplace = try container.decode(String.self, forKey: .marketplace)
+        self.plugin = try container.decode(String.self, forKey: .plugin)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(clawmanaged, forKey: .clawmanaged)
+        try container.encodeIfPresent(mode, forKey: .mode)
+        if let acknowledgeinstallpolicywarning, acknowledgeinstallpolicywarning != true {
+            throw EncodingError.invalidValue(
+                acknowledgeinstallpolicywarning,
+                .init(
+                    codingPath: container.codingPath + [CodingKeys.acknowledgeinstallpolicywarning],
+                    debugDescription: "Expected acknowledgeInstallPolicyWarning to equal true"
+                )
+            )
+        }
+        try container.encodeIfPresent(acknowledgeinstallpolicywarning, forKey: .acknowledgeinstallpolicywarning)
+        try container.encodeIfPresent(acknowledgecapabilities, forKey: .acknowledgecapabilities)
+        try container.encode("marketplace", forKey: .source)
+        try container.encode(marketplace, forKey: .marketplace)
+        try container.encode(plugin, forKey: .plugin)
     }
 }
 
 public enum PluginsInstallParams: Codable, Sendable {
     case clawhub(PluginsInstallParamsClawhub)
     case official(PluginsInstallParamsOfficial)
+    case bundled(PluginsInstallParamsBundled)
+    case local(PluginsInstallParamsLocal)
+    case npm(PluginsInstallParamsNpm)
+    case git(PluginsInstallParamsGit)
+    case npmPack(PluginsInstallParamsNpmPack)
+    case marketplace(PluginsInstallParamsMarketplace)
 
     private enum CodingKeys: String, CodingKey {
         case discriminator = "source"
@@ -27332,6 +28239,12 @@ public enum PluginsInstallParams: Codable, Sendable {
         switch discriminator {
         case "clawhub": self = try .clawhub(PluginsInstallParamsClawhub(from: decoder))
         case "official": self = try .official(PluginsInstallParamsOfficial(from: decoder))
+        case "bundled": self = try .bundled(PluginsInstallParamsBundled(from: decoder))
+        case "local": self = try .local(PluginsInstallParamsLocal(from: decoder))
+        case "npm": self = try .npm(PluginsInstallParamsNpm(from: decoder))
+        case "git": self = try .git(PluginsInstallParamsGit(from: decoder))
+        case "npm-pack": self = try .npmPack(PluginsInstallParamsNpmPack(from: decoder))
+        case "marketplace": self = try .marketplace(PluginsInstallParamsMarketplace(from: decoder))
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .discriminator,
@@ -27345,6 +28258,12 @@ public enum PluginsInstallParams: Codable, Sendable {
         switch self {
         case .clawhub(let value): try value.encode(to: encoder)
         case .official(let value): try value.encode(to: encoder)
+        case .bundled(let value): try value.encode(to: encoder)
+        case .local(let value): try value.encode(to: encoder)
+        case .npm(let value): try value.encode(to: encoder)
+        case .git(let value): try value.encode(to: encoder)
+        case .npmPack(let value): try value.encode(to: encoder)
+        case .marketplace(let value): try value.encode(to: encoder)
         }
     }
 }

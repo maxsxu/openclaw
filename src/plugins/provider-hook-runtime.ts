@@ -10,11 +10,11 @@ import {
   registryContainsRuntimePluginIds,
 } from "./active-runtime-registry.js";
 import {
-  PluginLruCache,
   resolveConfigScopedRuntimeCacheValue,
   type ConfigScopedRuntimeCache,
 } from "./plugin-cache-primitives.js";
 import { resolvePluginControlPlaneFingerprint } from "./plugin-control-plane-context.js";
+import { PluginLruCache } from "./plugin-lru-cache.js";
 import type { PluginMetadataRegistryView } from "./plugin-metadata-snapshot.types.js";
 import {
   resolveModelCatalogScope,

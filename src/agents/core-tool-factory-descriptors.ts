@@ -32,6 +32,7 @@ const CORE_TOOL_FACTORY_DESCRIPTORS = [
   { name: "secrets", family: "openclaw" },
   { name: "dashboard", family: "openclaw" },
   { name: "gateway", family: "openclaw" },
+  { name: "plugins", family: "openclaw" },
   { name: "get_goal", family: "openclaw" },
   { name: "github_identity_status", family: "openclaw" },
   { name: "github_publish", family: "openclaw" },

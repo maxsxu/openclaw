@@ -13,6 +13,7 @@ import {
 import type { InternalHookEvent } from "../hooks/internal-hooks.js";
 import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
 import {
+  clearActivePluginRegistry,
   getActivePluginRegistry,
   resetPluginRuntimeStateForTest,
   setActivePluginRegistry,
@@ -162,6 +163,8 @@ function createGatewayCloseTestDeps(
 ): GatewayCloseHandlerParams {
   return {
     resolveGatewayContext: () => undefined,
+    closePluginRegistry: clearActivePluginRegistry,
+    releasePluginMetadata: () => true,
     bonjourStop: null,
     tailscaleCleanup: null,
     stopChannel: vi.fn(async () => undefined),

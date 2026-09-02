@@ -23,14 +23,6 @@ export type PluginRuntimeModuleResolution = {
   error?: string;
 };
 
-export type BundledPackageCacheIdentity = {
-  packageJson: string;
-  packageRoot: string;
-  packageVersion: string;
-  size: number;
-  mtimeMs: number;
-};
-
 type PreparedPluginAliases = {
   cacheKey: string;
   getAliasMap: () => PluginSdkAliasMap;
@@ -69,7 +61,6 @@ export function createPluginCacheSdk() {
     packageSearches: new Map<string, { first?: string | null; all?: string[] }>(),
     argvDirectories: new Map<string, string[]>(),
     devSourceRoots: new Map<string, string | null>(),
-    bundledPackages: new Map<string, BundledPackageCacheIdentity | undefined>(),
     runtimeModules: new Map<string, PluginRuntimeModuleResolution>(),
     usableDistArtifacts: new Map<string, boolean>(),
     normalizedJitiAliases: new Map<string, PluginSdkAliasMap>(),

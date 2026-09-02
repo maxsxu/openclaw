@@ -5,7 +5,6 @@ const state = vi.hoisted(() => ({
   close: vi.fn(),
   flushSessionChanges: vi.fn(),
   stopPlugins: vi.fn(),
-  clearPluginRegistry: vi.fn(),
   preparePluginRegistryShutdown: vi.fn(async () => undefined),
 }));
 
@@ -60,7 +59,6 @@ vi.mock("../agents/provider-transport-dispatcher-pool.js", () => {
 vi.mock("../plugins/runtime.js", () => {
   state.loaded.push("plugin-runtime");
   return {
-    clearActivePluginRegistry: state.clearPluginRegistry,
     prepareActivePluginRegistryShutdown: state.preparePluginRegistryShutdown,
   };
 });
@@ -90,7 +88,6 @@ describe("gateway shutdown runtime", () => {
     expect(runtime.createGatewayCloseHandler).toBe(state.close);
     expect(runtime.flushPendingSessionsChangedEvents).toBe(state.flushSessionChanges);
     expect(runtime.runGlobalGatewayStopSafely).toBe(state.stopPlugins);
-    expect(runtime.clearActivePluginRegistry).toBe(state.clearPluginRegistry);
     expect(state.preparePluginRegistryShutdown).toHaveBeenCalledOnce();
   });
 });

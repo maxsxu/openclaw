@@ -2973,6 +2973,10 @@ export const en: TranslationMap & {
     hubTablistLabel: "Session sections",
   },
   pluginsPage: {
+    runtimeActive: "Running",
+    runtimeDisabled: "Stopped",
+    runtimeUnloaded: "Not loaded",
+    runtimeServiceFailed: "Service failed",
     searchLabel: "Search plugins",
     searchPlaceholder: "Search plugins and ClawHub",
     browseClawHub: "Browse ClawHub",
@@ -3062,9 +3066,11 @@ export const en: TranslationMap & {
     removeNamed: "Remove {name}",
     removeConfirmTitle: "Remove {name}?",
     removeConfirmMessage:
-      "Removing this plugin package and all of its entries restarts the Gateway immediately and interrupts active sessions.",
+      "Remove this plugin package and all of its entries? Its active connections and tools will stop. Your saved plugin data is kept.",
     cancel: "Cancel",
-    removedRestart: "Removed {name}. A Gateway restart is required to apply the change.",
+    removedSuccess: "Removed {name}.",
+    reload: "Reload",
+    reloadedSuccess: "Reloaded {name}.",
     verifiedSource: "Verified source",
     enableAction: "Enable",
     disableAction: "Disable",
@@ -3093,9 +3099,6 @@ export const en: TranslationMap & {
     install: "Install",
     installing: "Installing…",
     installNamed: "Install {name}",
-    installConfirmTitle: "Install {name}?",
-    installConfirmMessage:
-      "Installing this plugin restarts the Gateway immediately and interrupts active sessions.",
     policyReviewTitle: "Security review needed",
     policyReviewBodyKnown: "Policy warnings: {count}. Not installed.",
     policyReviewBodyReason: "{reason} Not installed.",
@@ -3112,11 +3115,8 @@ export const en: TranslationMap & {
     changesDisabled: "This gateway does not allow plugin changes.",
     configRefreshFailed: "Could not refresh Control UI configuration: {error}",
     installedSuccess: "Installed {name}.",
-    installedRestart: "Installed {name}. A Gateway restart is required to apply the change.",
     enabledSuccess: "Enabled {name}.",
-    enabledRestart: "Enabled {name}. A Gateway restart is required to apply the change.",
     disabledSuccess: "Disabled {name}.",
-    disabledRestart: "Disabled {name}. A Gateway restart is required to apply the change.",
   },
   labsPage: {
     intro:

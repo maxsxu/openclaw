@@ -1,14 +1,16 @@
 /** Caches plugin module loaders and native-load stats for runtime/source module imports. */
 import fs from "node:fs";
-import { createRequire } from "node:module";
+import { createRequire, isBuiltin } from "node:module";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import type { createJiti } from "jiti";
 import { openRootFileSync } from "../infra/boundary-file-read.js";
 import { sameFileIdentity } from "../infra/fs-safe-advanced.js";
+import { isPathInside } from "../infra/path-guards.js";
 import { toSafeImportPath } from "../shared/import-specifier.js";
+import { getProcessGatewayPluginMetadataSnapshot } from "./current-plugin-metadata-state.js";
 import {
-  clearPluginModuleRequireCache,
+  isJavaScriptModulePath,
   tryNativeRequireJavaScriptModule,
   tryNativeRequireModule,
 } from "./native-module-require.js";
@@ -19,7 +21,12 @@ import {
   getPluginCacheSource,
   withPluginCache,
 } from "./plugin-cache.js";
+import { capturePluginGenerationArtifact } from "./plugin-generation-artifact.js";
+import { getPluginInstance, type PluginInstanceHandle } from "./plugin-instance-scope.js";
+import { createPluginModuleHost } from "./plugin-module-host.js";
 import { installOpenClawInternalCorePackageNativeResolver } from "./plugin-sdk-native-resolver.js";
+import { resolvePluginRuntimeRecord } from "./runtime-state.js";
+import { getPluginRuntimeGatewayRequestScope } from "./runtime/gateway-request-scope.js";
 import {
   buildPluginLoaderJitiOptions,
   createPluginLoaderModuleCacheKey,
@@ -34,7 +41,6 @@ type PluginModuleLoader = (target: string) => unknown;
 export type PluginModuleLoaderFactory = typeof createJiti;
 type ResolvePluginModuleLoaderCacheEntryParams = {
   modulePath: string;
-  rootDir?: string;
   importerUrl: string;
   argvEntry?: string;
   preferBuiltDist?: boolean;
@@ -44,7 +50,6 @@ type ResolvePluginModuleLoaderCacheEntryParams = {
   devSourceRoot?: string | null;
   pluginSdkResolution?: PluginSdkResolutionPreference;
   cacheScopeKey?: string;
-  sharedCacheScopeKey?: string;
   transformOpenClawDependencies?: boolean;
 };
 type PluginModuleLoaderCacheEntry = {
@@ -53,7 +58,6 @@ type PluginModuleLoaderCacheEntry = {
   resolveAlias: (specifier: string) => string | undefined;
   tryNative: boolean;
   transformOpenClawDependencies: boolean;
-  cacheKey: string;
   scopedCacheKey: string;
 };
 type PluginModuleLoaderStatsSnapshot = {
@@ -115,38 +119,12 @@ function loadCreateJitiLoaderFactory(): PluginModuleLoaderFactory {
   if (createJitiLoaderFactory) {
     return createJitiLoaderFactory;
   }
-  const loaded = requireForJiti("jiti") as { createJiti?: PluginModuleLoaderFactory };
+  const loaded: typeof import("jiti") = requireForJiti("jiti");
   if (typeof loaded.createJiti !== "function") {
     throw new Error("jiti module did not export createJiti");
   }
   createJitiLoaderFactory = loaded.createJiti;
   return createJitiLoaderFactory;
-}
-
-function retainModuleLifecycle(cache: ReturnType<typeof getPluginCache>): void {
-  cache.disposeModules ??= () => {
-    for (const [modulePath, source] of cache.sources) {
-      const rootDir = source.boundaryRoot;
-      if (!rootDir) {
-        continue;
-      }
-      const extensionsDir =
-        path.basename(rootDir) === "extensions" ? rootDir : path.dirname(rootDir);
-      const distDir = path.dirname(extensionsDir);
-      const dependencyRoot =
-        path.basename(extensionsDir) === "extensions" && path.basename(distDir) === "dist"
-          ? distDir
-          : rootDir;
-      clearPluginModuleRequireCache(modulePath, { dependencyRoot });
-    }
-  };
-}
-
-/** Direct native imports share the generation's dependency cleanup with transformed modules. */
-export function recordPluginModuleRoot(modulePath: string, rootDir: string): void {
-  const cache = getPluginCache();
-  getPluginCacheSource(modulePath, cache).boundaryRoot = rootDir;
-  retainModuleLifecycle(cache);
 }
 
 function toSourceTransformImportPath(specifier: string): string {
@@ -179,17 +157,13 @@ function resolvePluginModuleLoaderCacheEntry(
   const moduleConfigCacheKey = `${tryNative ? "native" : "transform"}\0${aliases.cacheKey}`;
   const transformOpenClawDependencies = params.transformOpenClawDependencies ?? tryNative;
   const cacheKey = `${moduleConfigCacheKey}\0transform-openclaw=${transformOpenClawDependencies ? "1" : "0"}`;
-  const scopedCacheKey = `${loaderFilename}::${
-    params.sharedCacheScopeKey ??
-    (params.cacheScopeKey ? `${params.cacheScopeKey}::${cacheKey}` : cacheKey)
-  }`;
+  const scopedCacheKey = `${loaderFilename}::${params.cacheScopeKey ? `${params.cacheScopeKey}::` : ""}${cacheKey}`;
   return {
     loaderFilename,
     getAliasMap: aliases.getAliasMap,
     resolveAlias: aliases.resolveAlias,
     tryNative,
     transformOpenClawDependencies,
-    cacheKey,
     scopedCacheKey,
   };
 }
@@ -261,61 +235,41 @@ function createPluginModuleLoader(params: {
   createLoader?: PluginModuleLoaderFactory;
   cache: ReturnType<typeof getPluginCache>;
   cacheKey: string;
-  rootDir?: string;
 }): PluginModuleLoader {
   // A declined native require can leave an ESM dependency in flight. The
   // fallback must transform both the entry and OpenClaw SDK dependencies.
-  const getLoadWithSourceTransform = createLazySourceTransformLoader({
-    ...params,
-  });
+  const getLoadWithSourceTransform = createLazySourceTransformLoader(params);
   const loadCachedTarget = (target: string, load: () => unknown): unknown => {
     const source = getPluginCacheSource(target, params.cache);
     const cached = source.variants.get(params.cacheKey)?.exports;
     if (cached) {
       return cached.value;
     }
-    source.boundaryRoot =
-      params.rootDir ??
-      source.boundaryRoot ??
-      path.dirname(target.startsWith("file:") ? fileURLToPath(target) : target);
     // Lazy transforms and nested imports must read the creating generation,
     // even when a retained loader is invoked from a newer operation scope.
     const loaded = withPluginCache(params.cache, load);
     source.variants.set(params.cacheKey, { exports: { value: loaded } });
     return loaded;
   };
-  // When the caller has explicitly opted out of native loading, route every
-  // target through jiti so caller-provided alias rewrites still apply.
-  if (!params.tryNative) {
-    return (target) =>
-      loadCachedTarget(target, () => {
-        pluginModuleLoaderStats.calls += 1;
-        pluginModuleLoaderStats.sourceTransformForced += 1;
-        recordSourceTransformTarget(target);
-        return getLoadWithSourceTransform()(target);
-      });
-  }
-  // Otherwise prefer native require() for already-compiled JS artifacts
-  // (the bundled plugin public surfaces shipped in dist/). jiti's transform
-  // pipeline provides no value for output that is already plain JS and adds
-  // several seconds of per-load overhead on slower hosts. jiti still runs
-  // for TS / TSX sources and for the small set of require(esm) /
-  // async-module fallbacks `tryNativeRequireJavaScriptModule` declines to
-  // handle.
+  // Prefer native compiled JS, but preserve caller-requested transforms for alias rewrites.
   return (target) =>
     loadCachedTarget(target, () => {
       pluginModuleLoaderStats.calls += 1;
-      const native = tryNativeRequireJavaScriptModule(target, {
-        allowWindows: true,
-        aliasMap: params.resolveAlias,
-        fallbackOnMissingDependency: true,
-      });
-      if (native.ok) {
-        pluginModuleLoaderStats.nativeHits += 1;
-        return native.moduleExport;
+      if (params.tryNative) {
+        const native = tryNativeRequireJavaScriptModule(target, {
+          allowWindows: true,
+          aliasMap: params.resolveAlias,
+          fallbackOnMissingDependency: true,
+        });
+        if (native.ok) {
+          pluginModuleLoaderStats.nativeHits += 1;
+          return native.moduleExport;
+        }
+        pluginModuleLoaderStats.nativeMisses += 1;
+        pluginModuleLoaderStats.sourceTransformFallbacks += 1;
+      } else {
+        pluginModuleLoaderStats.sourceTransformForced += 1;
       }
-      pluginModuleLoaderStats.nativeMisses += 1;
-      pluginModuleLoaderStats.sourceTransformFallbacks += 1;
       recordSourceTransformTarget(target);
       return getLoadWithSourceTransform()(target);
     });
@@ -335,11 +289,9 @@ export function getCachedPluginModuleLoader(
   // Exact-key hits already own the native aliases installed with their loader;
   // reinstallation would rescan the host package on every cached request.
   installOpenClawInternalCorePackageNativeResolver({ moduleUrl: params.importerUrl });
-  retainModuleLifecycle(cache);
   const loader = createPluginModuleLoader({
     cache,
     cacheKey: cacheEntry.scopedCacheKey,
-    rootDir: params.rootDir,
     loaderFilename: cacheEntry.loaderFilename,
     getAliasMap: cacheEntry.getAliasMap,
     resolveAlias: cacheEntry.resolveAlias,
@@ -351,13 +303,94 @@ export function getCachedPluginModuleLoader(
   return loader;
 }
 
+/** Runtime and setup instances share the same captured source and injected host modules. */
+export function bindPluginInstanceModuleLoader(params: {
+  instance: PluginInstanceHandle;
+  source: string;
+  rootDir: string;
+  standalone?: boolean;
+  origin?: string;
+  loadHostModule: (source: string) => unknown;
+}): void {
+  const cache = getPluginCache();
+  if (params.origin === "bundled" && isJavaScriptModulePath(params.source)) {
+    // Core-shipped JS chunks keep process identity; source plugins own a reloadable graph.
+    params.instance.bindModuleLoader((source) =>
+      withPluginCache(cache, () => params.loadHostModule(source)),
+    );
+    return;
+  }
+  const artifact = capturePluginGenerationArtifact(
+    params.rootDir,
+    params.standalone ? params.source : undefined,
+  );
+  bindPluginCacheRoot(params.rootDir, artifact.sourceRoot);
+  params.instance.sourceDigest = artifact.sourceDigest;
+  params.instance.lifecycle.onDispose(artifact.dispose);
+  const nativeRequire = createRequire(params.source);
+  const host = createPluginModuleHost({
+    pluginId: params.instance.pluginId,
+    rootDir: artifact.boundaryRoot,
+    loadNativeModule: artifact.loadNativeModule,
+    globals: params.instance.prepareGlobals(nativeRequire),
+    loadHostModule: (specifier) =>
+      isBuiltin(specifier)
+        ? params.instance.loadBuiltin(specifier, nativeRequire)
+        : params.loadHostModule(specifier),
+  });
+  params.instance.lifecycle.onDispose(host.dispose);
+  params.instance.bindModuleLoader(
+    (source) => withPluginCache(cache, () => host.load(artifact.resolve(source))),
+    artifact.hasSource,
+  );
+}
+
 type PluginModuleBoundaryParams = {
   modulePath: string;
   boundaryRoot: string;
   boundaryLabel: string;
   rejectHardlinks: boolean;
   surfaceLabel: string;
+  pluginId?: string;
 };
+
+function resolvePublicSurfaceInstance(params: PluginModuleBoundaryParams) {
+  if (
+    !isPathInside(params.boundaryRoot, params.modulePath) &&
+    !isPathInside(getPluginCacheRoot(params.boundaryRoot).rootDir, params.modulePath)
+  ) {
+    throw new Error(`Unable to open ${params.surfaceLabel}: outside ${params.boundaryLabel}`);
+  }
+  const owner = resolvePluginRuntimeRecord(params);
+  const instance = owner ? getPluginInstance(owner) : undefined;
+  // Core-shipped libraries also serve config/doctor inspection while disabled.
+  // Captured source membership stays authoritative even after its files disappear.
+  if (
+    owner?.origin === "bundled" &&
+    (owner.status !== "loaded" || instance?.hasModuleSource(params.modulePath) === undefined)
+  ) {
+    return undefined;
+  }
+  if (!owner || owner.status !== "loaded") {
+    if (getPluginRuntimeGatewayRequestScope()?.pluginRegistry) {
+      const bundled =
+        !owner &&
+        getProcessGatewayPluginMetadataSnapshot()?.manifestRegistry.plugins.some(
+          (record) =>
+            record.origin === "bundled" && isPathInside(record.rootDir, params.modulePath),
+        );
+      if (bundled) {
+        return undefined;
+      }
+      throw new Error(`Plugin public surface ${params.modulePath} has no active runtime owner.`);
+    }
+    return undefined;
+  }
+  if (!instance) {
+    throw new Error(`Plugin ${owner.id} has no runtime module owner`);
+  }
+  return instance;
+}
 
 /** Validates an entry once per generation without changing its module export shape. */
 export function preparePluginModule(params: PluginModuleBoundaryParams) {
@@ -391,7 +424,6 @@ export function preparePluginModule(params: PluginModuleBoundaryParams) {
   source = getPluginCacheSource(opened.path, cache);
   source.modulePath = opened.path;
   source.validatedBoundaries.add(`${opened.rootRealPath}\0${params.rejectHardlinks}`);
-  retainModuleLifecycle(cache);
   return { source, modulePath: opened.path };
 }
 
@@ -401,6 +433,11 @@ export function loadPluginPublicSurfaceModuleSync(
     loadModule: (modulePath: string) => unknown;
   },
 ): object {
+  const instance = resolvePublicSurfaceInstance(params);
+  if (instance) {
+    // SAFETY: Public-surface entrypoints have object exports; the instance owns this exact source.
+    return instance.loadModule(params.modulePath) as object;
+  }
   const { source, modulePath } = preparePluginModule(params);
   const cached = source.publicSurface?.exports;
   if (cached) {
@@ -408,7 +445,6 @@ export function loadPluginPublicSurfaceModuleSync(
   }
   const sentinel: Record<string, unknown> = {};
   source.publicSurface = { exports: sentinel };
-  source.boundaryRoot = params.boundaryRoot;
   try {
     Object.assign(sentinel, params.loadModule(modulePath));
     return sentinel;
@@ -424,6 +460,11 @@ export async function loadPluginPublicSurfaceModule(
     loadModule: (modulePath: string) => Promise<object>;
   },
 ): Promise<object> {
+  const instance = resolvePublicSurfaceInstance(params);
+  if (instance) {
+    // SAFETY: Public-surface entrypoints have object exports; the instance owns this exact source.
+    return instance.loadModule(params.modulePath) as object;
+  }
   const { source, modulePath } = preparePluginModule(params);
   const cached = source.publicSurface;
   if (cached?.exports) {
@@ -432,7 +473,6 @@ export async function loadPluginPublicSurfaceModule(
   if (cached?.pending) {
     return cached.pending;
   }
-  source.boundaryRoot = params.boundaryRoot;
   const pending = params.loadModule(modulePath).then(
     (loaded) => {
       source.publicSurface = { exports: loaded };

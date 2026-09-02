@@ -90,6 +90,7 @@ const {
   clearManagedPluginOfficialCatalogCache,
   inspectManagedPlugin,
   listManagedPlugins,
+  reloadManagedPlugin,
   setManagedPluginEnabled,
 } = await import("./management-service.js");
 
@@ -296,7 +297,7 @@ describe("managed plugin capability consent", () => {
     );
   });
 
-  it("enables and reports a verified official install without legacy acceptance", async () => {
+  it("enables, reloads, and reports a verified official install without legacy acceptance", async () => {
     const rootDir = officialArtifact();
     const record = { ...officialSources[0]!, installPath: rootDir };
     const config = {
@@ -316,6 +317,7 @@ describe("managed plugin capability consent", () => {
     const byPluginId = new Map(manifestRegistry.plugins.map((manifest) => [manifest.id, manifest]));
     const metadata = {
       index,
+      manifestRegistry,
       byPluginId,
       plugins: manifestRegistry.plugins,
       diagnostics: manifestRegistry.diagnostics,
@@ -323,9 +325,24 @@ describe("managed plugin capability consent", () => {
     };
     mocks.records = { diffs: record };
     mocks.metadata.mockReturnValue(metadata);
+    mocks.readConfig.mockResolvedValue(configSnapshot(config));
     await expect(
       resolvePluginCapabilityConsent({ config, env, pluginId: "diffs" }),
     ).resolves.toBeUndefined();
+    const application = { operationId: "official-reload", generation: 1, pluginIds: ["diffs"] };
+    const applyRuntime = vi
+      .fn<Parameters<typeof reloadManagedPlugin>[0]["applyRuntime"]>()
+      .mockResolvedValue(application);
+    await expect(reloadManagedPlugin({ pluginId: "diffs", env, applyRuntime })).resolves.toEqual({
+      pluginId: "diffs",
+      application,
+    });
+    expect(applyRuntime).toHaveBeenCalledWith({
+      config,
+      pluginIds: ["diffs"],
+      reason: "reload",
+      assertInvokerOwned: expect.any(Function),
+    });
     expect(mocks.writeRecords).not.toHaveBeenCalled();
     expect(collectPluginCapabilityConsentDiagnostics({ index, manifests: byPluginId })).toEqual([]);
     const catalog = await listManagedPlugins({ config, env });
@@ -334,24 +351,32 @@ describe("managed plugin capability consent", () => {
     );
   });
 
-  it("rejects enabling an unaccepted plugin with only its reviewed-surface challenge", async () => {
-    const record = installRecord();
-    const snapshot = configureExternalPlugin(record);
-    const manifest = snapshot.byPluginId.get("community-plugin")!;
-    manifest.providers.push("community-provider");
-    writeConsentArtifact(record.installPath!, "community-plugin", ["community-provider"]);
+  it.each(["enable", "reload"] as const)(
+    "rejects %s of an unaccepted plugin with actionable consent guidance",
+    async (action) => {
+      const record = installRecord();
+      const snapshot = configureExternalPlugin(record);
+      const manifest = snapshot.byPluginId.get("community-plugin")!;
+      manifest.providers.push("community-provider");
+      writeConsentArtifact(record.installPath!, "community-plugin", ["community-provider"]);
+      const applyRuntime = vi.fn<Parameters<typeof reloadManagedPlugin>[0]["applyRuntime"]>();
+      const params = { pluginId: "community-plugin", env: {}, applyRuntime };
 
-    await expect(
-      setManagedPluginEnabled({ pluginId: "community-plugin", enabled: true, env: {} }),
-    ).rejects.toMatchObject({
-      capabilityConsent: {
-        pluginId: "community-plugin",
-        reviewToken: artifactReviewToken(record),
-      },
-      message: expect.stringContaining("--accept-capabilities"),
-    });
-    expect(mocks.replaceConfig).not.toHaveBeenCalled();
-  });
+      await expect(
+        action === "enable"
+          ? setManagedPluginEnabled({ ...params, enabled: true })
+          : reloadManagedPlugin(params),
+      ).rejects.toMatchObject({
+        capabilityConsent: {
+          pluginId: "community-plugin",
+          reviewToken: artifactReviewToken(record),
+        },
+        message: expect.stringContaining("reload command with --accept-capabilities"),
+      });
+      expect(mocks.replaceConfig).not.toHaveBeenCalled();
+      expect(applyRuntime).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["supplied", "interactive"] as const)(
     "persists only a matching %s acknowledgment and reuses it",

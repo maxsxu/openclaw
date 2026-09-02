@@ -178,7 +178,7 @@ export function projectPluginDependencyHealth<T extends PluginDependencyHealthRe
     const message =
       `Plugin "${plugin.id}" cannot load because required dependencies are missing: ` +
       `${status.missing.join(", ")}. Install the plugin dependencies or reinstall/update the ` +
-      "plugin, then restart the Gateway.";
+      `plugin, then run "openclaw plugins reload ${plugin.id}".`;
     const existingDiagnosticIndex = diagnostics.findIndex(
       (entry) => entry.level === "error" && entry.pluginId === plugin.id,
     );

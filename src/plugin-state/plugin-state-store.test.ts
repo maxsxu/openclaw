@@ -1,6 +1,7 @@
 // Plugin state store tests cover per-plugin persisted state reads and writes.
 import { chmodSync, existsSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
+import { runInNewContext } from "node:vm";
 import { MAX_DATE_TIMESTAMP_MS } from "@openclaw/normalization-core/number-coercion";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -774,6 +775,17 @@ describe("plugin state keyed store", () => {
       ).toThrow(PluginStateStoreError);
 
       const store = createPluginStateKeyedStore("discord", { namespace: "valid", maxEntries: 10 });
+      const realmValue: unknown = runInNewContext('({ nested: [{ value: "retained" }] })');
+      await store.register("realm", realmValue);
+      await expect(store.lookup("realm")).resolves.toEqual({ nested: [{ value: "retained" }] });
+      for (const value of [
+        runInNewContext("new (class Entry { value = 'invalid'; })()"),
+        Object.create(null),
+        Object.create({ inherited: true }),
+        Object.create(Object.create(null, { constructor: { value: Object } })),
+      ]) {
+        await expect(store.register("prototype", value)).rejects.toThrow(PluginStateStoreError);
+      }
       await expect(store.register(" ", { ok: true })).rejects.toThrow(PluginStateStoreError);
       await expect(store.register("undefined", undefined)).rejects.toThrow(PluginStateStoreError);
       await expect(store.register("infinity", Number.POSITIVE_INFINITY)).rejects.toThrow(

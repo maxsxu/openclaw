@@ -14,6 +14,7 @@ import {
   type PluginSessionSchedulerJobHandle,
   type PluginSessionSchedulerJobRegistration,
 } from "./host-hooks.js";
+import { runPluginCleanup } from "./plugin-instance-scope.js";
 import type { PluginRegistry } from "./registry-types.js";
 
 type PluginRunContextNamespaces = Map<string, PluginJsonValue>;
@@ -391,6 +392,33 @@ export function registerPluginSessionSchedulerJob(params: {
   return { id, pluginId: params.pluginId, sessionKey, kind };
 }
 
+/** Publish collected jobs and transfer dynamic jobs without rotating retained instances. */
+export function publishPluginSessionSchedulerJobs(registry: PluginRegistry): void {
+  const state = getPluginHostRuntimeState();
+  for (const [pluginId, jobs] of state.schedulerJobsByPlugin) {
+    const retained = registry.plugins.find((record) => record.id === pluginId);
+    for (const job of jobs.values()) {
+      if (retained && job.ownerRegistry?.plugins.includes(retained)) {
+        job.ownerRegistry = registry;
+      }
+    }
+  }
+  for (const registration of registry.sessionSchedulerJobs) {
+    const current = state.schedulerJobsByPlugin
+      .get(registration.pluginId)
+      ?.get(registration.job.id);
+    if (current?.ownerRegistry === registry && current.generation === registration.generation) {
+      continue;
+    }
+    registerPluginSessionSchedulerJob({ ...registration, ownerRegistry: registry });
+    registration.generation = getPluginSessionSchedulerJobGeneration({
+      pluginId: registration.pluginId,
+      jobId: registration.job.id,
+      sessionKey: registration.job.sessionKey,
+    });
+  }
+}
+
 export function deletePluginSessionSchedulerJob(params: {
   pluginId: string;
   jobId: string;
@@ -415,24 +443,7 @@ export function deletePluginSessionSchedulerJob(params: {
   }
 }
 
-function hasPluginSessionSchedulerJob(params: {
-  pluginId: string;
-  jobId: string;
-  sessionKey?: string;
-  generation?: number;
-}): boolean {
-  const state = getPluginHostRuntimeState();
-  const record = state.schedulerJobsByPlugin.get(params.pluginId)?.get(params.jobId);
-  if (!record) {
-    return false;
-  }
-  if (params.sessionKey && record.job.sessionKey !== params.sessionKey) {
-    return false;
-  }
-  return params.generation === undefined || record.generation === params.generation;
-}
-
-export function getPluginSessionSchedulerJobGeneration(params: {
+function getPluginSessionSchedulerJobGeneration(params: {
   pluginId: string;
   jobId: string;
   sessionKey?: string;
@@ -474,6 +485,37 @@ export async function cleanupPluginSessionSchedulerJobs(params: {
   if (!shouldCleanup()) {
     return failures;
   }
+  const cleanupJob = async (
+    pluginId: string,
+    jobId: string,
+    record: { job: PluginSessionSchedulerJobRegistration; generation?: number },
+    registeredSessionKey?: string,
+  ): Promise<void> => {
+    const hookId = `scheduler:${jobId}`;
+    try {
+      await withPluginHostCleanupTimeout(hookId, () =>
+        runPluginCleanup(record.job.cleanup ?? record.job, () =>
+          record.job.cleanup?.({
+            reason: params.reason,
+            sessionKey: registeredSessionKey ?? record.job.sessionKey,
+            jobId,
+          }),
+        ),
+      );
+    } catch (error) {
+      failures.push({ pluginId, hookId, error });
+      return;
+    }
+    if (shouldCleanup()) {
+      // A replacement may now own this id; delete only the generation we cleaned.
+      deletePluginSessionSchedulerJob({
+        pluginId,
+        jobId,
+        sessionKey: registeredSessionKey,
+        expectedGeneration: record.generation,
+      });
+    }
+  };
   const registryRecordKeys = new Set<string>();
   const schedulerJobKey = (pluginId: string, jobId: string, sessionKey: string) =>
     `${pluginId}\0${jobId}\0${sessionKey}`;
@@ -499,17 +541,8 @@ export async function cleanupPluginSessionSchedulerJobs(params: {
         jobId,
         sessionKey,
       });
-      if (record.generation !== undefined && liveGeneration === undefined) {
-        continue;
-      }
-      if (
-        record.generation === undefined &&
-        !hasPluginSessionSchedulerJob({
-          pluginId: record.pluginId,
-          jobId,
-          sessionKey,
-        })
-      ) {
+      // Unpublished candidates have no generation and must never clean a live predecessor.
+      if (record.generation === undefined || liveGeneration === undefined) {
         continue;
       }
       const preserveJob = params.preserveJobIds?.has(jobId) ?? false;
@@ -524,32 +557,7 @@ export async function cleanupPluginSessionSchedulerJobs(params: {
       // A newer generation may already own this id. The old cleanup callback can
       // still release plugin-owned resources, while deletion below is generation
       // matched so it cannot remove the newer live record.
-      const hookId = `scheduler:${jobId}`;
-      try {
-        await withPluginHostCleanupTimeout(hookId, () =>
-          record.job.cleanup?.({
-            reason: params.reason,
-            sessionKey,
-            jobId,
-          }),
-        );
-      } catch (error) {
-        failures.push({
-          pluginId: record.pluginId,
-          hookId,
-          error,
-        });
-        continue;
-      }
-      if (!shouldCleanup()) {
-        continue;
-      }
-      deletePluginSessionSchedulerJob({
-        pluginId: record.pluginId,
-        jobId,
-        sessionKey,
-        expectedGeneration: record.generation,
-      });
+      await cleanupJob(record.pluginId, jobId, record, sessionKey);
     }
   }
   const pluginIds = params.pluginId ? [params.pluginId] : [...state.schedulerJobsByPlugin.keys()];
@@ -591,30 +599,7 @@ export async function cleanupPluginSessionSchedulerJobs(params: {
       if (params.preserveJobIds?.has(jobId)) {
         continue;
       }
-      const hookId = `scheduler:${jobId}`;
-      try {
-        await withPluginHostCleanupTimeout(hookId, () =>
-          record.job.cleanup?.({
-            reason: params.reason,
-            sessionKey: record.job.sessionKey,
-            jobId,
-          }),
-        );
-      } catch (error) {
-        failures.push({
-          pluginId,
-          hookId,
-          error,
-        });
-        continue;
-      }
-      if (!shouldCleanup()) {
-        continue;
-      }
-      jobs.delete(jobId);
-    }
-    if (jobs.size === 0) {
-      state.schedulerJobsByPlugin.delete(pluginId);
+      await cleanupJob(pluginId, jobId, record);
     }
   }
   return failures;

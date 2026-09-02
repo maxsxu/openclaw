@@ -548,10 +548,10 @@ Reload never migrates workspace state.
 
 ### Reload modes
 
-| Mode                   | Behavior                                                                      |
-| ---------------------- | ----------------------------------------------------------------------------- |
-| **`hybrid`** (default) | Hot-applies safe changes instantly. Automatically restarts for critical ones. |
-| **`off`**              | Disables file watching. Changes take effect on the next manual restart.       |
+| Mode                   | Behavior                                                                                           |
+| ---------------------- | -------------------------------------------------------------------------------------------------- |
+| **`hybrid`** (default) | Hot-applies safe changes instantly. Automatically restarts for critical ones.                      |
+| **`off`**              | Disables automatic config application. Use explicit plugin management or restart to apply changes. |
 
 ```json5
 {
@@ -585,7 +585,7 @@ back to OpenClaw.
 | Automation              | `hooks`, `cron`, `agent.heartbeat`                                                                                                                                           | No (restarts that subsystem)           |
 | Sessions & messages     | `session`, `messages`                                                                                                                                                        | No                                     |
 | Tools & media           | `tools`, `skills`, `mcp`, `audio`, `talk`                                                                                                                                    | No                                     |
-| Plugin config           | `plugins.entries.*`, `plugins.allow`, `plugins.deny`, `plugins.enabled`                                                                                                      | No (reloads plugin runtime)            |
+| Plugins                 | `plugins.*`                                                                                                                                                                  | No (reloads plugin runtime)            |
 | UI & misc               | `ui`, `logging`, `identity`, `bindings`                                                                                                                                      | No                                     |
 | Gateway HTTP APIs       | `gateway.http.endpoints`, `gateway.http.securityHeaders.strictTransportSecurity`                                                                                             | No (next request)                      |
 | Gateway tools & nodes   | `gateway.tools`, `gateway.nodes.browser`, `gateway.nodes.pairing`, `gateway.nodes.commands`, `gateway.nodes.pluginTools.enabled`, `gateway.nodes.allowSkills`                | No                                     |
@@ -597,7 +597,7 @@ back to OpenClaw.
 | Discovery visibility    | `discovery.mdns.mode`                                                                                                                                                        | No (replaces discovery advertisements) |
 | Browser defaults        | `browser.profiles`, `browser.defaultProfile`, `browser.headless`, `browser.executablePath`, `browser.attachOnly`, `browser.cdpUrl`, `browser.noSandbox`, `browser.extraArgs` | No                                     |
 | Gateway server          | Other `gateway.*` settings (port, bind, auth mode, roles, tailscale, TLS)                                                                                                    | **Yes**                                |
-| Infrastructure          | Other `discovery` and `browser` settings, `plugins.load`, `plugins.installs`                                                                                                 | **Yes**                                |
+| Infrastructure          | Other `discovery` and `browser` settings                                                                                                 | **Yes**                                |
 
 Changes to `channels.defaults` and `channels.modelByChannel` restart loaded
 channel runtimes to refresh their shared policy. Manually stopped accounts stay
@@ -657,15 +657,17 @@ For SecretRef credentials, set `gateway.auth.mode` explicitly to make rotation
 eligible for hot reload. Auth-mode changes still restart the Gateway.
 
 <Note>
-Changing `gateway.reload` or `gateway.remote` also does **not** trigger a restart. Individual plugins can override this table: a loaded plugin may declare its own restart-triggering config prefixes (for example the bundled Canvas plugin restarts the Gateway for `plugins.enabled`, `plugins.allow`, and `plugins.deny`, not just its own `plugins.entries.canvas`), so the actual behavior depends on which plugins are active.
+`gateway.reload` and `gateway.remote` are exceptions under `gateway.*` - changing them does **not** trigger a restart. `browser.profiles.*` also hot-applies. Loaded plugins can override the table with their registered reload prefixes, so automatic config reload follows the active plugins' policy. Explicit plugin management applies plugin changes without restarting the Gateway, but rejects unrelated changes to restart-required settings.
 </Note>
 
-Plugin hot reload uses the package metadata discovered at Gateway startup.
-Enablement, plugin config, and account changes do not rescan plugin files.
-Install, update, uninstall, and explicit plugin metadata refresh require a
-Gateway restart; `hybrid` schedules that restart, while `off` leaves it to you.
-Changing an agent's workspace also does not discover plugins in the new
-directory until restart. See [Plugin metadata snapshots](/plugins/architecture#plugin-metadata-snapshot-and-lookup-table).
+Plugin runtime replacement refreshes package metadata and publishes it with
+the new registry. Install, update, uninstall, reload, and explicit metadata
+refresh apply through the running Gateway without restarting it, including
+when automatic config reload is off. Plugin files are not continuously watched;
+after editing source or a manifest, run `openclaw plugins reload <id>`.
+The Gateway keeps its selected plugin workspace until restart; changing an
+agent's workspace alone does not switch that plugin discovery root. See
+[Plugin metadata snapshots](/plugins/architecture#plugin-metadata-snapshot-and-lookup-table).
 
 ### Reload planning
 

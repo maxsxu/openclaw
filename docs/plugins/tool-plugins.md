@@ -419,9 +419,11 @@ openclaw plugins install npm-pack:./openclaw-plugin-stock-quotes-0.1.0.tgz
 openclaw plugins inspect stock-quotes --runtime --json
 ```
 
-After installing, restart or reload the Gateway and ask the agent to use the
-tool. If the tool is not visible, inspect the plugin runtime and the effective
-tool catalog before changing code (see [Troubleshooting](#troubleshooting)).
+Installation applies to the running Gateway. Ask the agent to use the tool.
+After editing an installed plugin or a linked source directory, run
+`openclaw plugins reload <plugin-id>`. If the tool is not visible, inspect the
+plugin runtime and the effective tool catalog before changing code (see
+[Troubleshooting](#troubleshooting)).
 
 ## Publish
 
@@ -489,7 +491,7 @@ Check these in order:
 2. `openclaw plugins validate --root <plugin-root> --entry ./dist/index.js`
 3. `openclaw.plugin.json` has `contracts.tools` with the expected tool names.
 4. `package.json` has `openclaw.extensions: ["./dist/index.js"]`.
-5. The Gateway was restarted or reloaded after installing the plugin.
+5. The install completed runtime activation. Check the connected Gateway's plugin state in the Control UI and resolve any reported activation error.
 
 ## See also
 

@@ -668,7 +668,7 @@ describe("PluginsPage", () => {
     await waitForFast(() => expect(page.busy["plugin:workboard"]).toBeUndefined());
   });
 
-  it("waits for uninstall restart confirmation and sends nothing when cancelled", async () => {
+  it("waits for uninstall confirmation and sends nothing when cancelled", async () => {
     const removable = createPlugin({
       id: "community-thing",
       name: "Community Thing",
@@ -710,7 +710,7 @@ describe("PluginsPage", () => {
       expect.objectContaining({
         title: "Remove Community Thing?",
         message:
-          "Removing this plugin package and all of its entries restarts the Gateway immediately and interrupts active sessions.",
+          "Remove this plugin package and all of its entries? Its active connections and tools will stop. Your saved plugin data is kept.",
         confirmLabel: "Remove",
         danger: true,
       }),

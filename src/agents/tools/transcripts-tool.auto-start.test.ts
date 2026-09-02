@@ -232,3 +232,128 @@ describe("transcripts auto-start stop reporting", () => {
     });
   });
 });
+
+describe("continuous transcript startup ownership", () => {
+  it.each(["replacement abort", "title write failure"] as const)(
+    "retains cleanup and resumes after %s",
+    async (fault) => {
+      const stateDir = await fs.realpath(tempDirs.make("openclaw-transcripts-continuous-"));
+      const store = new TranscriptsStore(path.join(stateDir, "transcripts"), {
+        env: { ...process.env, OPENCLAW_STATE_DIR: stateDir },
+      });
+      const release = createDeferred();
+      const requests: TranscriptStartRequest[] = [];
+      const stop = vi.fn<NonNullable<TranscriptSourceProvider["stop"]>>(async () => ({
+        ok: false,
+        error: "fixture capture still owns resources",
+      }));
+      const provider: TranscriptSourceProvider = {
+        id: "continuous-fixture",
+        name: "Continuous fixture",
+        sourceKinds: ["live-caption"],
+        async start(request) {
+          requests.push(request);
+          await release.promise;
+          return { ok: true, session: { ...request.session, title: "Provider title" } };
+        },
+        stop,
+      };
+      const registry = createEmptyPluginRegistry();
+      registry.transcriptSourceProviders.push({
+        pluginId: provider.id,
+        provider,
+        source: import.meta.url,
+      });
+      const logger = { warn: vi.fn<(message: string) => void>() };
+      const ctx = {
+        config: { transcripts: { autoStart: [{ providerId: provider.id }] } },
+        stateDir,
+        logger,
+        caller: { kind: "operator" as const, source: "local" as const },
+      };
+      const service = createTranscriptsAutoStartService(ctx);
+      const tool = createTranscriptsTool(ctx);
+      const execute = (action: string, sessionId?: string) =>
+        tool.execute("continuous-owner", { action, providerId: provider.id, sessionId });
+      const originalWrite = store.writeSession.bind(store);
+      let rejectedTitle = false;
+      const writeSession = vi
+        .spyOn(TranscriptsStore.prototype, "writeSession")
+        .mockImplementation(async (session) => {
+          if (fault === "title write failure" && session.title && !rejectedTitle) {
+            rejectedTitle = true;
+            throw new Error("fixture title write unavailable");
+          }
+          await originalWrite(session);
+        });
+      const affected = new Set([provider.id]);
+      let pendingStop: Promise<void> | undefined;
+      await withPluginRuntimeRegistryScope(registry, async () => {
+        try {
+          service.start();
+          await vi.waitFor(() => expect(requests).toHaveLength(1));
+          const original = requests[0]!;
+          const sessionId = original.session.sessionId;
+          if (fault === "replacement abort") {
+            pendingStop = service.stop(affected);
+            const stopped = pendingStop.catch((error: unknown) => error);
+            expect(original.abortSignal?.aborted).toBe(true);
+            release.resolve();
+            expect(await stopped).toBeInstanceOf(AggregateError);
+            expect(stop).toHaveBeenCalledTimes(2);
+          } else {
+            release.resolve();
+            await vi.waitFor(() =>
+              expect(logger.warn).toHaveBeenCalledWith(
+                expect.stringMatching(/capture cleanup pending.*reload its plugin/),
+              ),
+            );
+            expect(stop).toHaveBeenCalledOnce();
+            expect(original.abortSignal?.aborted).toBe(false);
+          }
+          await expect(execute("status")).resolves.toMatchObject({
+            details: { active: [expect.objectContaining({ sessionId })] },
+          });
+          await expect(execute("start", sessionId)).rejects.toThrow(
+            "transcripts session already active",
+          );
+          expect(requests).toHaveLength(1);
+          await original.onUtterance({ text: "late failed capture", final: true });
+          await expect(store.readUtterancesForSession(original.session)).resolves.toEqual([]);
+
+          // The same canonical stop must acknowledge cleanup before auto-start can resume.
+          const previousStops = stop.mock.calls.length;
+          stop.mockImplementation(async ({ sessionId }) => ({ ok: true, sessionId }));
+          await service.stop(affected);
+          expect(stop).toHaveBeenCalledTimes(previousStops + 1);
+          await expect(execute("status")).resolves.toMatchObject({ details: { active: [] } });
+          service.start();
+          await vi.waitFor(async () => {
+            expect(requests).toHaveLength(2);
+            expect(await execute("status")).toMatchObject({
+              details: {
+                active: [expect.objectContaining({ sessionId: requests[1]!.session.sessionId })],
+              },
+            });
+          });
+          await original.onUtterance({ text: "stale replaced capture", final: true });
+          const current = requests[1]!;
+          expect(current.session.sessionId).not.toBe(sessionId);
+          await current.onUtterance({ text: "current capture", final: true });
+          expect(
+            (await store.readUtterancesForSession(current.session)).map((row) => row.text),
+          ).toEqual(["current capture"]);
+        } finally {
+          release.resolve();
+          writeSession.mockRestore();
+          stop.mockImplementation(async ({ sessionId }) => ({ ok: true, sessionId }));
+          await pendingStop?.catch(() => {});
+          await service.stop();
+          for (const request of requests) {
+            await execute("stop", request.session.sessionId);
+          }
+        }
+      });
+    },
+  );
+});

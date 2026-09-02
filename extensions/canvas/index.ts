@@ -33,9 +33,6 @@ export default definePluginEntry({
   name: "Canvas",
   description: "Presents hosted widget documents on paired macOS panels.",
   configSchema: canvasConfigSchema,
-  reload: {
-    restartPrefixes: ["plugins.enabled", "plugins.allow", "plugins.deny", "plugins.entries.canvas"],
-  },
   register(api) {
     if (isCanvasHostEnabled(api.config)) {
       api.registerBoardWidgetContentKind(canvasA2UIBoardWidgetKind);

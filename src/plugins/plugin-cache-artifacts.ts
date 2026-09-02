@@ -10,7 +10,6 @@ export type PluginSourceCacheRecord = {
   modulePath?: string;
   variants: Map<string, PluginModuleCacheVariant>;
   validatedBoundaries: Set<string>;
-  boundaryRoot?: string;
   facadeTracked?: true;
   publicSurface?: { exports?: object; pending?: Promise<object> };
 };
@@ -38,7 +37,6 @@ export function createPluginCacheArtifacts(): {
   moduleLoaders: Map<string, (target: string) => unknown>;
   sources: Map<string, PluginSourceCacheRecord>;
   sourceAliases: Map<string, string>;
-  disposeModules?: () => void;
 } {
   return { moduleLoaders: new Map(), sources: new Map(), sourceAliases: new Map() };
 }

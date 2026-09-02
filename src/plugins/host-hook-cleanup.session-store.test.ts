@@ -145,7 +145,10 @@ describe("plugin host cleanup session stores", () => {
       pluginId: "cleanup",
       reason: "disable",
       sessionKey: "shared-session",
-      sessionStorePaths: [firstStorePath, secondStorePath],
+      sessionStoreTargets: [
+        { agentId: "a", storePath: firstStorePath },
+        { agentId: "b", storePath: secondStorePath },
+      ],
     });
 
     expect(result).toEqual({ cleanupCount: 2, failures: [] });
@@ -310,7 +313,7 @@ describe("plugin host cleanup session stores", () => {
       registry,
       pluginId: "fixture-plugin",
       reason: "disable",
-      sessionStorePaths: [storePath],
+      sessionStoreTargets: [{ agentId: "main", storePath }],
     });
 
     expect(result).toEqual({ cleanupCount: 2, failures: [] });

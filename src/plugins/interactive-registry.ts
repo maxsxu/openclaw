@@ -7,6 +7,7 @@ import {
   validatePluginInteractiveNamespace,
 } from "./interactive-shared.js";
 import { clearPluginInteractiveHandlersState } from "./interactive-state.js";
+import { wrapCurrentPluginInstance } from "./plugin-instance-scope.js";
 import type { PluginRegistry } from "./registry-types.js";
 import {
   getActivePluginChannelRegistry,
@@ -92,7 +93,7 @@ function registerPluginInteractiveHandlerWithOptions(
     };
   }
   registrations.push({
-    ...registration,
+    ...wrapCurrentPluginInstance(registration),
     namespace,
     channel: normalizeOptionalLowercaseString(registration.channel) ?? "",
     pluginId,

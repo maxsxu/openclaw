@@ -7,17 +7,53 @@ import { areBundledPluginsDisabled, resolveBundledPluginsDir } from "../plugins/
 import type { PluginManifestRecord } from "../plugins/manifest-registry.js";
 import { parsePluginCacheJson, readPluginCacheFile } from "../plugins/plugin-cache-files.js";
 import {
-  normalizeBundledPluginArtifactSubpath,
   resolveBundledPluginPublicSurfacePath,
   resolveBundledPluginSourcePublicSurfacePath,
   resolvePluginRootPublicSurfacePath,
 } from "../plugins/public-surface-runtime.js";
+import { getPluginRegistryForContext } from "../plugins/runtime-state.js";
 
 /** Resolved facade module path plus the package/plugin root that bounds imports. */
 export type FacadeModuleLocationLike = {
   modulePath: string;
   boundaryRoot: string;
+  pluginId?: string;
 };
+
+/** An executing instance wins over metadata and bundled fallbacks, including a missing surface. */
+export function resolveRuntimeFacadeModuleLocation(params: {
+  dirName: string;
+  artifactBasename: string;
+  env?: NodeJS.ProcessEnv;
+}): FacadeModuleLocationLike | null | undefined {
+  if (params.env !== undefined && params.env !== process.env) {
+    return undefined;
+  }
+  const records =
+    getPluginRegistryForContext()?.plugins.filter(
+      (record) => record.status === "loaded" && record.rootDir,
+    ) ?? [];
+  const candidates = [
+    records.filter((record) => record.id === params.dirName),
+    records.filter((record) => path.basename(record.rootDir!) === params.dirName),
+    records.filter((record) => record.channelIds.includes(params.dirName)),
+  ].find((matches) => matches.length);
+  if (!candidates) {
+    return undefined;
+  }
+  if (candidates.length !== 1) {
+    throw new Error(
+      `Plugin public surface ${params.dirName} has ambiguous runtime ownership; use its plugin id.`,
+    );
+  }
+  const owner = candidates[0]!;
+  const modulePath = resolvePluginRootPublicSurfacePath({
+    pluginRoot: owner.rootDir!,
+    pluginId: owner.id,
+    artifactBasename: params.artifactBasename,
+  });
+  return modulePath ? { modulePath, boundaryRoot: owner.rootDir!, pluginId: owner.id } : null;
+}
 
 type FacadeRegistryRecordLike = {
   id: string;
@@ -149,17 +185,21 @@ export function resolveBundledFacadeModuleLocation(params: {
   artifactBasename: string;
   env?: NodeJS.ProcessEnv;
   bundledPluginsDir?: string | null;
+  preferSource?: boolean;
 }): FacadeModuleLocationLike | null {
   const env = params.env ?? process.env;
   if (areBundledPluginsDisabled(env)) {
     return null;
   }
-  const preferSource = !params.currentModulePath.includes(`${path.sep}dist${path.sep}`);
+  const preferSource =
+    params.preferSource ?? !params.currentModulePath.includes(`${path.sep}dist${path.sep}`);
   const packageSourceRoot = path.resolve(params.packageRoot, "extensions");
   const publicSurfaceParams = {
     rootDir: params.packageRoot,
     env: params.env,
-    ...(params.bundledPluginsDir ? { bundledPluginsDir: params.bundledPluginsDir } : {}),
+    ...(params.bundledPluginsDir
+      ? { bundledPluginsDir: params.bundledPluginsDir, bundledPluginsDirMode: "explicit" as const }
+      : {}),
     dirName: params.dirName,
     artifactBasename: params.artifactBasename,
   };
@@ -201,13 +241,13 @@ export function resolveRegistryPluginModuleLocationFromRecords(params: {
     (plugin) => path.basename(plugin.rootDir) === params.dirName,
     (plugin) => plugin.channels.includes(params.dirName),
   ];
-  const artifactBasename = normalizeBundledPluginArtifactSubpath(params.artifactBasename);
   for (const matchFn of tiers) {
     for (const record of params.registry.filter(matchFn)) {
       const rootDir = path.resolve(record.rootDir);
       const modulePath = resolvePluginRootPublicSurfacePath({
         pluginRoot: rootDir,
-        artifactBasename,
+        pluginId: record.id,
+        artifactBasename: params.artifactBasename,
       });
       if (modulePath) {
         return { modulePath, boundaryRoot: rootDir };

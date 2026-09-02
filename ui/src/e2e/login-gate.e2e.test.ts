@@ -328,21 +328,20 @@ suite.define(() => {
       await page.goto(suite.server.baseUrl);
       await gateway.waitForRequest("connect");
 
-      await page.locator(".login-gate__failure").waitFor();
-      // Retryable guidance must survive a real reconnect, including time spent capturing proof.
+      // Retryable guidance must survive a reconnect while proof is captured.
       if (fixture.error.code === "UNAVAILABLE") {
         await gateway.waitForRequest("connect", { after: 1 });
       }
-      await page.screenshot({
-        path: path.join(RECOVERY_ARTIFACT_DIR, "login-failure.png"),
-        fullPage: true,
-        animations: "disabled",
-      });
       const failure = page.locator(`.login-gate__failure[data-kind="${fixture.expectedKind}"]`);
       await failure.waitFor({ timeout: 10_000 });
       expect(await failure.locator(".login-gate__failure-title").textContent()).toBe(
         fixture.expectedTitle,
       );
+      await page.screenshot({
+        path: path.join(RECOVERY_ARTIFACT_DIR, "login-failure.png"),
+        fullPage: true,
+        animations: "disabled",
+      });
     } catch (error) {
       await captureControlUiE2eFailureDiagnostics(page, {
         error: error instanceof Error ? error : new Error(String(error)),

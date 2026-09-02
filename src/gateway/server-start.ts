@@ -96,6 +96,7 @@ export async function startGatewayServerCore(
   postReadyWorkTimer.unref?.();
 
   const close = createCloseHandler();
+  let stopHooks: Promise<void> | undefined;
 
   return {
     startupSettled,
@@ -110,14 +111,14 @@ export async function startGatewayServerCore(
           { name: "post-ready sidecars", run: stopRegisteredPostReadySidecars },
           {
             name: "gateway_stop plugin hooks",
-            run: async () => {
-              await shutdownRuntime.runGlobalGatewayStopSafely({
+            run: () =>
+              (stopHooks ??= shutdownRuntime.runGlobalGatewayStopSafely({
+                registry: gatewayKernel.pluginRuntime.registry,
                 event: { reason: optsLocal?.reason ?? "gateway stopping" },
                 ctx: { port },
                 onError: (error) =>
                   log.warn(`gateway_stop hook failed: ${formatErrorMessage(error)}`),
-              });
-            },
+              })),
           },
           { name: "gateway close prelude", run: runClosePrelude },
           { name: "late sidecar cleanup", run: sealAndJoinRegisteredSidecarStops },

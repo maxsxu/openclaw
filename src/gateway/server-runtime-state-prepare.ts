@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
-import { listLoadedChannelPlugins } from "../channels/plugins/registry-loaded.js";
+import { listLoadedChannelPluginsForRegistry } from "../channels/plugins/registry-loaded.js";
 import type { ChannelId } from "../channels/plugins/types.public.js";
 import { createDefaultDeps } from "../cli/deps.js";
 import { getRuntimeConfig } from "../config/io.js";
@@ -9,6 +9,7 @@ import { isTruthyEnvValue } from "../infra/env.js";
 import { loadGatewayTlsServerRuntime } from "../infra/tls/gateway.js";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
 import { runtimeForLogger } from "../logging/subsystem.js";
+import type { createPluginRegistryOwner } from "../plugins/runtime.js";
 import { isGatewayDraining } from "../process/command-queue.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { getActiveSecretsRuntimeConfigSnapshot } from "../secrets/runtime-state.js";
@@ -47,13 +48,10 @@ type GatewayStartupChannelPlugin = {
   meta: { aliases?: readonly string[] };
 };
 
-function listGatewayStartupChannelPlugins(): GatewayStartupChannelPlugin[] {
-  return listLoadedChannelPlugins() as GatewayStartupChannelPlugin[];
-}
-
 export async function prepareGatewayKernelState(params: {
   bootstrap: GatewayBootstrap;
   bootId: string;
+  pluginRegistryOwner: ReturnType<typeof createPluginRegistryOwner>;
   port: number;
   opts: GatewayBootstrap["opts"];
   log: GatewayLogger;
@@ -95,10 +93,11 @@ export async function prepareGatewayKernelState(params: {
     minimalTestGateway,
     pluginGatewayContext,
   } = bootstrap;
-  const pluginRuntime = {
-    registry: pluginBootstrap.pluginRegistry,
+  const pluginRuntime = Object.assign(params.pluginRegistryOwner, {
     baseGatewayMethods: pluginBootstrap.baseGatewayMethods,
-  };
+  });
+  const listGatewayStartupChannelPlugins = (registry = pluginRuntime.registry) =>
+    listLoadedChannelPluginsForRegistry(registry) as GatewayStartupChannelPlugin[];
   // The core device provider is configuration-free, so every full Gateway owns the
   // worker service even when no plugin-backed cloud profile has been configured.
   const shouldStartWorkerEnvironmentService = Boolean(workerEnvironmentStartup);
@@ -241,9 +240,9 @@ export async function prepareGatewayKernelState(params: {
   const channelRuntimeEnvs: Partial<Record<ChannelId, RuntimeEnv>> = Object.fromEntries(
     Object.entries(channelLogs).map(([id, logger]) => [id, runtimeForLogger(logger)]),
   );
-  const listStartupChannelGatewayMethods = () => {
+  const listStartupChannelGatewayMethods = (registry = pluginRuntime.registry) => {
     const methods: string[] = [];
-    for (const plugin of listGatewayStartupChannelPlugins()) {
+    for (const plugin of listGatewayStartupChannelPlugins(registry)) {
       methods.push(...(plugin.gatewayMethods ?? []));
       for (const descriptor of plugin.gatewayMethodDescriptors ?? []) {
         methods.push(descriptor.name);

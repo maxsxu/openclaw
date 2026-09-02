@@ -111,7 +111,7 @@ export async function finishGatewayStartup(params: {
     pluginMetadataSnapshot,
     pluginLookUpTable,
     ambientEnvTriggers,
-    replaceAttachedPluginRuntime,
+    prepareAttachedPluginRuntime,
     refreshAttachedGatewayDiscovery,
     wss,
     httpBindHosts,
@@ -266,6 +266,7 @@ export async function finishGatewayStartup(params: {
         ...(pluginMetadataSnapshot ? { pluginMetadataSnapshot } : {}),
         pluginRuntimeClaim: startupPluginRuntimeClaim,
         getCurrentPluginRegistry: () => pluginRuntime.registry,
+        getCurrentPluginServices: kernel.pluginRuntimeGeneration.currentServices,
         getCurrentPluginMetadataSnapshot: getPluginMetadataSnapshot,
         ambientEnvTriggers,
         pluginRegistry: pluginRuntime.registry,
@@ -301,12 +302,18 @@ export async function finishGatewayStartup(params: {
           startupState.pendingReason = "startup-sidecars";
         },
         onStartupPluginsLoaded: async (loaded) => {
-          if (!startupPluginRuntimeClaim.publish(() => replaceAttachedPluginRuntime(loaded))) {
-            loaded.retireGatewayRuntimeBindings?.();
-            return;
+          const prepared = await prepareAttachedPluginRuntime(loaded);
+          // Preparation can finish after close has fenced this Gateway.
+          if (
+            lifecycle.closePreludeStarted ||
+            !startupPluginRuntimeClaim.publish(prepared.publish)
+          ) {
+            return false;
           }
           startupState.pendingReason = "startup-sidecars";
+          prepared.afterCommit();
           await refreshAttachedGatewayDiscovery(loaded.pluginRegistry, startupPluginRuntimeClaim);
+          return true;
         },
         getCronService: () =>
           runtimeState?.cronState.cron as PluginHookGatewayCronService | undefined,
@@ -353,7 +360,7 @@ export async function finishGatewayStartup(params: {
       }),
     ),
   );
-  kernel.setPostAttachHandles(postAttachHandles, startupPluginRuntimeClaim);
+  kernel.setPostAttachHandles(postAttachHandles);
   startupTrace.detail("memory.ready", collectGatewayProcessMemoryUsageMb());
   startupTrace.mark("ready");
   if (sidecarStartup === "defer") {

@@ -3,6 +3,7 @@ import { tryResolveConfiguredAgentWorkspaceDir } from "../agents/agent-scope.js"
 import { initSubagentRegistry } from "../agents/subagents/registry/subagent-registry.js";
 import { resolveDefaultAgentWorkspaceDir } from "../agents/workspace-default.js";
 import type { AmbientEnvTriggerPolicy } from "../channels/config-presence.js";
+import { validateConfiguredBindings } from "../channels/plugins/configured-binding-registry.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   collectRegisteredEmbeddingProviderIds,
@@ -11,9 +12,14 @@ import {
 } from "../plugins/channel-plugin-ids.js";
 import { loadPluginLookUpTable } from "../plugins/plugin-lookup-table.js";
 import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
+import {
+  markPluginRegistryActive,
+  withPluginRegistryPreparationScope,
+} from "../plugins/registry-lifecycle.js";
 import type { PluginRegistry, PluginRegistryParams } from "../plugins/registry-types.js";
 import { createEmptyPluginRegistry } from "../plugins/registry.js";
-import { getActivePluginRegistry, setActivePluginRegistry } from "../plugins/runtime.js";
+import { disposePluginRegistryInstances, getActivePluginRegistry } from "../plugins/runtime.js";
+import { withPluginRuntimeRegistryScope } from "../plugins/runtime/gateway-request-scope.js";
 import { resolveGatewayStartupPluginActivationConfig } from "./plugin-activation-runtime-config.js";
 import { listGatewayMethods } from "./server-methods-list.js";
 import type { GatewayContextResolver } from "./server-methods/types.js";
@@ -171,14 +177,13 @@ export async function prepareGatewayPluginBootstrap(params: {
       : new Set<string>();
 
   const baseMethods = listGatewayMethods();
+  // Core requests need a live local registry without displacing another Gateway's plugins.
   const emptyPluginRegistry = createEmptyPluginRegistry();
-  // Minimal tests may reuse an active registry only while plugins are enabled. Production
-  // publishes an empty pre-bind registry; startup plugin runtimes attach after the listener binds.
+  markPluginRegistryActive(emptyPluginRegistry);
   const pluginRegistry =
     params.minimalTestGateway && !pluginsGloballyDisabled
       ? (getActivePluginRegistry() ?? emptyPluginRegistry)
       : emptyPluginRegistry;
-  setActivePluginRegistry(pluginRegistry);
 
   return {
     gatewayPluginConfigAtStart: gatewayPluginConfig,
@@ -236,7 +241,7 @@ export async function loadGatewayStartupPluginRuntime(params: {
 }) {
   // Keep server-plugin-bootstrap behind one lazy boundary; startup config tests can exercise
   // planning without importing plugin package runtimes.
-  const { loadGatewayStartupPlugins } = await import("./server-plugin-bootstrap.js");
+  const { prepareGatewayPluginLoad } = await import("./server-plugin-bootstrap.js");
   await params.pluginRuntimeClaim?.waitForUnblocked();
   if (params.pluginRuntimeClaim && !params.pluginRuntimeClaim.isCurrent()) {
     const currentPluginRegistry = params.getCurrentPluginRegistry?.();
@@ -248,7 +253,8 @@ export async function loadGatewayStartupPluginRuntime(params: {
       gatewayMethods: params.baseMethods,
     };
   }
-  const loaded = loadGatewayStartupPlugins({
+  const loaded = prepareGatewayPluginLoad({
+    loadIntent: "startup",
     cfg: params.cfg,
     activationSourceConfig: params.activationSourceConfig,
     workspaceDir: params.workspaceDir,
@@ -267,10 +273,25 @@ export async function loadGatewayStartupPluginRuntime(params: {
       ? { resolveGatewayContext: params.resolveGatewayContext }
       : {}),
   });
-  warnUnregisteredConfiguredMemoryEmbeddingProviders({
-    config: params.cfg,
-    pluginRegistry: loaded.pluginRegistry,
-    log: params.log,
-  });
-  return loaded;
+  try {
+    await withPluginRegistryPreparationScope(loaded.pluginRegistry, () =>
+      withPluginRuntimeRegistryScope(loaded.pluginRegistry, () =>
+        validateConfiguredBindings(loaded.resolvedConfig),
+      ),
+    );
+    warnUnregisteredConfiguredMemoryEmbeddingProviders({
+      config: loaded.resolvedConfig,
+      pluginRegistry: loaded.pluginRegistry,
+      log: params.log,
+    });
+    return loaded;
+  } catch (error) {
+    loaded.retireGatewayRuntimeBindings();
+    await disposePluginRegistryInstances(loaded.pluginRegistry).catch((cleanupError: unknown) => {
+      throw new AggregateError([error, cleanupError], "Startup plugin candidate cleanup failed", {
+        cause: error,
+      });
+    });
+    throw error;
+  }
 }

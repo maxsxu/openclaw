@@ -83,6 +83,7 @@ const TRAIN_2026_7_METHODS = [
 const CURRENT_TRAIN_METHODS = [
   "diagnostics.lanes",
   "plugins.inspect",
+  "plugins.reload",
   "device.pair.setupStatus",
   "openclaw.setup.activate.start",
   "exec.approval.grants.list",

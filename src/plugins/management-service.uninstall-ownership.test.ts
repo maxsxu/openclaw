@@ -103,6 +103,7 @@ describe("plugin management uninstall channel ownership", () => {
           ],
           installRecords: { [pluginId]: installRecord },
         },
+        manifestRegistry: { plugins: [manifest], diagnostics: [] },
         byPluginId: new Map([[pluginId, manifest]]),
         normalizePluginId: (rawPluginId: string) => rawPluginId,
       });
@@ -156,6 +157,7 @@ describe("plugin management uninstall channel ownership", () => {
         plugins: [{ pluginId, origin: "global", enabled: true, rootDir: installPath }],
         installRecords: { [pluginId]: installRecord },
       },
+      manifestRegistry: { plugins: [], diagnostics: [] },
       byPluginId: new Map(),
       normalizePluginId: (rawPluginId: string) => rawPluginId,
     });
@@ -191,6 +193,7 @@ describe("plugin management uninstall channel ownership", () => {
         ],
         installRecords: { [pluginId]: installRecord },
       },
+      manifestRegistry: { plugins: [], diagnostics: [] },
       byPluginId: new Map(),
       normalizePluginId: (rawPluginId: string) => rawPluginId,
     });
@@ -238,6 +241,7 @@ describe("plugin management uninstall channel ownership", () => {
             : [],
           installRecords: { [pluginId]: installRecord },
         },
+        manifestRegistry: { plugins: [], diagnostics: [] },
         byPluginId: new Map(),
         normalizePluginId: (rawPluginId: string) => rawPluginId,
       });
@@ -316,6 +320,7 @@ describe("plugin management uninstall channel ownership", () => {
         ],
         installRecords: { pack: installRecord },
       },
+      manifestRegistry: { plugins: manifests.map(([, manifest]) => manifest), diagnostics: [] },
       byPluginId: new Map(manifests),
       normalizePluginId: (pluginId: string) => pluginId,
     });
@@ -389,6 +394,7 @@ describe("plugin management uninstall channel ownership", () => {
         ),
         installRecords: { pack: installRecord },
       },
+      manifestRegistry: { plugins: manifests, diagnostics: [] },
       byPluginId: new Map(manifests.map((manifest) => [manifest.id, manifest])),
       diagnostics: [],
       normalizePluginId: (pluginId: string) => pluginId,

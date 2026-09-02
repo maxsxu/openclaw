@@ -82,12 +82,15 @@ export function hasGlobalHooks<K extends PluginHookName>(
 }
 
 export async function runGlobalGatewayStopSafely(params: {
+  registry?: GlobalHookRunnerRegistry;
   event: PluginHookGatewayStopEvent;
   ctx: PluginHookGatewayContext;
   onError?: (err: unknown) => void;
 }): Promise<void> {
   const log = getLog();
-  const hookRunner = getGlobalHookRunner();
+  const hookRunner = params.registry
+    ? createHookRunner(params.registry, { logger: log })
+    : getGlobalHookRunner();
   if (!hookRunner?.hasHooks("gateway_stop")) {
     return;
   }

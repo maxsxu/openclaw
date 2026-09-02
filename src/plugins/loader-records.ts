@@ -106,6 +106,8 @@ export function createPluginRecord(params: {
 
 /** Marks a discovered plugin inactive without discarding its metadata record. */
 export function markPluginActivationDisabled(record: PluginRecord, reason?: string): void {
+  record.status = "disabled";
+  record.error = reason;
   record.activated = false;
   record.activationSource = "disabled";
   record.activationReason = reason;

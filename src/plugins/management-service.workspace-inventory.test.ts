@@ -40,7 +40,7 @@ vi.mock("./official-external-plugin-catalog.js", async (importOriginal) => ({
 
 const {
   listManagedPlugins,
-  refreshManagedPluginMetadata,
+  refreshManagedPlugins,
   setManagedPluginEnabled,
   uninstallManagedPlugin,
 } = await import("./management-service.js");
@@ -91,7 +91,28 @@ it("refreshes an externally changed install ledger before publishing management 
     );
   });
 
-  refreshManagedPluginMetadata({ config });
+  configIo.read.mockResolvedValue({
+    snapshot: {
+      valid: true,
+      parsed: config,
+      path: path.join(root, "openclaw.json"),
+      sourceConfig: config,
+      hash: "base-hash",
+    },
+    writeOptions: { expectedConfigPath: path.join(root, "openclaw.json") },
+  });
+  const applyRuntime = vi.fn(async ({ pluginIds }: { pluginIds: readonly string[] }) => ({
+    operationId: "metadata-refresh",
+    generation: 1,
+    pluginIds: [...pluginIds],
+  }));
+  await refreshManagedPlugins({ applyRuntime });
+  expect(applyRuntime).toHaveBeenCalledWith({
+    config,
+    pluginIds: [fixture.pluginId],
+    reason: "metadata",
+    assertInvokerOwned: expect.any(Function),
+  });
 
   expect((await listManagedPlugins({ config })).plugins).toContainEqual(
     expect.objectContaining({ id: fixture.pluginId, installed: true }),

@@ -4,16 +4,18 @@ import { resolveRuntimeConfigCacheKey } from "../config/runtime-snapshot.js";
 import { pruneMapToMaxSize } from "../infra/map-size.js";
 import type { JsonObject, ToolDescriptor } from "../tools/types.js";
 import type { PluginLoadOptions } from "./loader.js";
-import { registerPluginMetadataProcessMemoLifecycleClear } from "./plugin-metadata-lifecycle.js";
+import type { PluginManifestRecord } from "./manifest-registry.types.js";
+import { getPluginCache, type PluginCache } from "./plugin-cache.js";
 import type { PluginRegistry } from "./registry-types.js";
 import type { OpenClawPluginToolContext } from "./types.js";
 
 const PLUGIN_TOOL_DESCRIPTOR_CACHE_VERSION = 3;
 const PLUGIN_TOOL_DESCRIPTOR_CACHE_LIMIT = 256;
 
-/** Cached display descriptor for one plugin-created tool. */
+/** A descriptor retains its producing registry; retired instances reject cached invocations. */
 export type CachedPluginToolDescriptor = {
   descriptor: ToolDescriptor;
+  registry: PluginRegistry;
   displaySummary?: string;
   hideFromChannelProgress?: AnyAgentTool["hideFromChannelProgress"];
   requiredClientCaps?: string[];
@@ -21,22 +23,26 @@ export type CachedPluginToolDescriptor = {
   optional: boolean;
 };
 
-export const pluginToolDescriptorCacheState = {
-  descriptors: new Map<string, CachedPluginToolDescriptor[]>(),
-  objectIds: new WeakMap<object, number>(),
-  nextObjectId: 1,
-  runtimeRegistries: new WeakMap<CachedPluginToolDescriptor, PluginRegistry>(),
-};
-
-function clearPluginToolDescriptorCache(): void {
-  pluginToolDescriptorCacheState.descriptors.clear();
-  pluginToolDescriptorCacheState.objectIds = new WeakMap();
-  pluginToolDescriptorCacheState.nextObjectId = 1;
-  pluginToolDescriptorCacheState.runtimeRegistries = new WeakMap();
+function createPluginToolDescriptorCacheState() {
+  return {
+    descriptors: new Map<string, CachedPluginToolDescriptor[]>(),
+    objectIds: new WeakMap<object, number>(),
+    nextObjectId: 1,
+  };
 }
 
-// Plugin source and retained registries stay stable until their metadata lifecycle is retired.
-registerPluginMetadataProcessMemoLifecycleClear(clearPluginToolDescriptorCache);
+const caches = new WeakMap<PluginCache, ReturnType<typeof createPluginToolDescriptorCacheState>>();
+
+/** Reloaded code gets fresh descriptors; retained tools keep their exact generation's state. */
+function getPluginToolDescriptorCacheState() {
+  const cache = getPluginCache();
+  let state = caches.get(cache);
+  if (!state) {
+    state = createPluginToolDescriptorCacheState();
+    caches.set(cache, state);
+  }
+  return state;
+}
 
 export type PluginToolDescriptorConfigCacheKeyMemo = WeakMap<object, string | number | null>;
 
@@ -49,12 +55,13 @@ function getDescriptorCacheObjectId(value: object | null | undefined): number | 
   if (!value) {
     return null;
   }
-  const existing = pluginToolDescriptorCacheState.objectIds.get(value);
+  const state = getPluginToolDescriptorCacheState();
+  const existing = state.objectIds.get(value);
   if (existing !== undefined) {
     return existing;
   }
-  const next = pluginToolDescriptorCacheState.nextObjectId++;
-  pluginToolDescriptorCacheState.objectIds.set(value, next);
+  const next = state.nextObjectId++;
+  state.objectIds.set(value, next);
   return next;
 }
 
@@ -123,21 +130,18 @@ function buildDescriptorContextCacheKey(params: {
 }
 
 export function buildPluginToolDescriptorCacheKey(params: {
-  pluginId: string;
-  source: string;
-  rootDir?: string;
-  contractToolNames: readonly string[];
+  plugin: Pick<PluginManifestRecord, "id" | "source" | "rootDir" | "contracts">;
   ctx: OpenClawPluginToolContext;
   currentRuntimeConfig?: PluginLoadOptions["config"] | null;
   configCacheKeyMemo?: PluginToolDescriptorConfigCacheKeyMemo;
-  clientCaps?: readonly string[];
+  clientCaps?: ReadonlySet<string> | readonly string[];
 }): string {
   return JSON.stringify({
     version: PLUGIN_TOOL_DESCRIPTOR_CACHE_VERSION,
-    pluginId: params.pluginId,
-    source: params.source,
-    rootDir: params.rootDir ?? null,
-    contractToolNames: [...params.contractToolNames].toSorted(),
+    pluginId: params.plugin.id,
+    source: params.plugin.source,
+    rootDir: params.plugin.rootDir,
+    contractToolNames: [...(params.plugin.contracts?.tools ?? [])].toSorted(),
     clientCaps: [...(params.clientCaps ?? [])].toSorted(),
     context: buildDescriptorContextCacheKey({
       ctx: params.ctx,
@@ -153,12 +157,14 @@ function asJsonObject(value: unknown): JsonObject {
 
 export function capturePluginToolDescriptor(params: {
   pluginId: string;
+  registry: PluginRegistry;
   tool: AnyAgentTool;
   optional: boolean;
 }): CachedPluginToolDescriptor {
   const label = (params.tool as { label?: unknown }).label;
   const title = typeof label === "string" && label.trim() ? label.trim() : undefined;
   return {
+    registry: params.registry,
     ...(params.tool.displaySummary ? { displaySummary: params.tool.displaySummary } : {}),
     ...(params.tool.hideFromChannelProgress === true ? { hideFromChannelProgress: true } : {}),
     ...(params.tool.requiredClientCaps
@@ -183,21 +189,16 @@ export function capturePluginToolDescriptor(params: {
 export function readCachedPluginToolDescriptors(
   cacheKey: string,
 ): readonly CachedPluginToolDescriptor[] | undefined {
-  return pluginToolDescriptorCacheState.descriptors.get(cacheKey);
+  return getPluginToolDescriptorCacheState().descriptors.get(cacheKey);
 }
 
 export function writeCachedPluginToolDescriptors(params: {
   cacheKey: string;
   descriptors: readonly CachedPluginToolDescriptor[];
 }): void {
-  if (
-    !pluginToolDescriptorCacheState.descriptors.has(params.cacheKey) &&
-    pluginToolDescriptorCacheState.descriptors.size >= PLUGIN_TOOL_DESCRIPTOR_CACHE_LIMIT
-  ) {
-    pruneMapToMaxSize(
-      pluginToolDescriptorCacheState.descriptors,
-      PLUGIN_TOOL_DESCRIPTOR_CACHE_LIMIT - 1,
-    );
+  const { descriptors } = getPluginToolDescriptorCacheState();
+  if (!descriptors.has(params.cacheKey) && descriptors.size >= PLUGIN_TOOL_DESCRIPTOR_CACHE_LIMIT) {
+    pruneMapToMaxSize(descriptors, PLUGIN_TOOL_DESCRIPTOR_CACHE_LIMIT - 1);
   }
-  pluginToolDescriptorCacheState.descriptors.set(params.cacheKey, [...params.descriptors]);
+  descriptors.set(params.cacheKey, [...params.descriptors]);
 }

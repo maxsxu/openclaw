@@ -231,7 +231,7 @@ export function attachGatewayWsConnectionHandler(params: AttachGatewayWsConnecti
     const pluginNodeCapabilities =
       connectionKind === "gateway" ? (getPluginNodeCapabilities?.() ?? []) : [];
     const pluginSurfaceBaseUrl =
-      pluginNodeCapabilities.length > 0
+      connectionKind === "gateway"
         ? resolveHostedPluginSurfaceUrl({
             port,
             forwardedHost: upgradeReq.headers["x-forwarded-host"],

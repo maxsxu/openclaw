@@ -19,10 +19,12 @@ const applyPluginAutoEnable = vi.hoisted(() =>
 const initSubagentRegistry = vi.hoisted(() => vi.fn());
 const getActivePluginRegistry = vi.hoisted(() => vi.fn<() => PluginRegistry | undefined>());
 const setActivePluginRegistry = vi.hoisted(() => vi.fn());
-const loadGatewayStartupPlugins = vi.hoisted(() =>
-  vi.fn((_params: unknown) => ({
-    pluginRegistry: { diagnostics: [], gatewayHandlers: {}, plugins: [] },
+const prepareGatewayPluginLoad = vi.hoisted(() =>
+  vi.fn((params: { cfg: OpenClawConfig }) => ({
+    pluginRegistry: createEmptyPluginRegistry(),
     gatewayMethods: ["ping"],
+    resolvedConfig: params.cfg,
+    retireGatewayRuntimeBindings: vi.fn(),
   })),
 );
 const pluginManifestRegistry = vi.hoisted((): PluginManifestRegistry => ({
@@ -177,7 +179,7 @@ vi.mock("./server-methods-list.js", () => ({
 }));
 
 vi.mock("./server-plugin-bootstrap.js", () => ({
-  loadGatewayStartupPlugins: (params: unknown) => loadGatewayStartupPlugins(params),
+  prepareGatewayPluginLoad,
 }));
 
 vi.mock("./server-startup-session-migration.js", () => ({
@@ -311,7 +313,7 @@ describe("prepareGatewayPluginBootstrap startup plugins", () => {
     setActivePluginRegistry.mockClear();
     applyPluginAutoEnable.mockClear();
     initSubagentRegistry.mockClear();
-    loadGatewayStartupPlugins.mockClear();
+    prepareGatewayPluginLoad.mockClear();
     listAmbientOnlyConfiguredChannelIds.mockClear().mockReturnValue([]);
     loadPluginLookUpTable.mockClear().mockReturnValue({
       manifestRegistry: pluginManifestRegistry,
@@ -438,7 +440,7 @@ describe("prepareGatewayPluginBootstrap startup plugins", () => {
       dreaming: { enabled: false },
     });
 
-    expect(loadGatewayStartupPlugins).not.toHaveBeenCalled();
+    expect(prepareGatewayPluginLoad).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -447,10 +449,14 @@ describe("prepareGatewayPluginBootstrap startup plugins", () => {
     { minimalTestGateway: true, pluginsEnabled: true, reuseAmbientRegistry: true },
     { minimalTestGateway: true, pluginsEnabled: false, reuseAmbientRegistry: false },
   ])(
-    "publishes the startup registry without runtime loading (minimal=$minimalTestGateway, enabled=$pluginsEnabled)",
+    "keeps the pre-bind registry local without runtime loading (minimal=$minimalTestGateway, enabled=$pluginsEnabled)",
     async ({ minimalTestGateway, pluginsEnabled, reuseAmbientRegistry }) => {
+      const { capturePluginRegistryLifecycleEpoch, markPluginRegistryActive } =
+        await import("../plugins/registry-lifecycle.js");
       const ambientRegistry = createEmptyPluginRegistry();
       ambientRegistry.gatewayHandlers.fixture = vi.fn();
+      markPluginRegistryActive(ambientRegistry);
+      const ambientEpoch = capturePluginRegistryLifecycleEpoch(ambientRegistry);
       getActivePluginRegistry.mockReturnValue(ambientRegistry);
 
       const result = await prepareBootstrapWithRuntimeConfig(
@@ -463,8 +469,11 @@ describe("prepareGatewayPluginBootstrap startup plugins", () => {
       } else {
         expect(result.pluginRegistry.gatewayHandlers).toEqual({});
       }
-      expect(setActivePluginRegistry).toHaveBeenCalledWith(result.pluginRegistry);
-      expect(loadGatewayStartupPlugins).not.toHaveBeenCalled();
+      expect(capturePluginRegistryLifecycleEpoch(result.pluginRegistry)).toBeDefined();
+      expect(capturePluginRegistryLifecycleEpoch(ambientRegistry)).toBe(ambientEpoch);
+      expect(setActivePluginRegistry).not.toHaveBeenCalled();
+      expect(getActivePluginRegistry()).toBe(ambientRegistry);
+      expect(prepareGatewayPluginLoad).not.toHaveBeenCalled();
     },
   );
 
@@ -532,16 +541,18 @@ describe("prepareGatewayPluginBootstrap startup plugins", () => {
     expect(result.baseGatewayMethods).toEqual(["ping"]);
 
     expect(loadPluginLookUpTable).not.toHaveBeenCalled();
-    expect(loadGatewayStartupPlugins).not.toHaveBeenCalled();
+    expect(prepareGatewayPluginLoad).not.toHaveBeenCalled();
   });
 });
 
 describe("loadGatewayStartupPluginRuntime", () => {
   beforeEach(() => {
-    loadGatewayStartupPlugins.mockClear().mockReturnValue({
-      pluginRegistry: { diagnostics: [], gatewayHandlers: {}, plugins: [] },
+    prepareGatewayPluginLoad.mockClear().mockImplementation((params) => ({
+      pluginRegistry: createEmptyPluginRegistry(),
       gatewayMethods: ["ping"],
-    });
+      resolvedConfig: params.cfg,
+      retireGatewayRuntimeBindings: vi.fn(),
+    }));
   });
 
   it("warns after a full startup runtime load when configured memory embedding providers stay unregistered", async () => {
@@ -566,10 +577,12 @@ describe("loadGatewayStartupPluginRuntime", () => {
       startupPluginIds: ["voyage"],
     });
 
-    const startupInput = firstCallArg<{ channelPluginLoadIntent?: "full" | "setup" }>(
-      loadGatewayStartupPlugins,
-    );
+    const startupInput = firstCallArg<{
+      channelPluginLoadIntent?: "full" | "setup";
+      loadIntent?: "startup" | "replacement";
+    }>(prepareGatewayPluginLoad);
     expect(startupInput.channelPluginLoadIntent).toBe("full");
+    expect(startupInput.loadIntent).toBe("startup");
     expect(log.warn).toHaveBeenCalledWith(
       expect.stringContaining('memory.search.provider="voyage"'),
     );

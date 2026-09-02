@@ -16,16 +16,15 @@ import { createInternalHookEvent, triggerInternalHook } from "../hooks/internal-
 import type { HeartbeatRunner } from "../infra/heartbeat-runner.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { closePluginStateDatabase } from "../plugin-state/plugin-state-store.js";
-import { clearActivePluginRegistry } from "../plugins/runtime.js";
 import type { PluginServicesHandle } from "../plugins/services.js";
 import { drainGlobalSingletonLifecycleState } from "../shared/global-singleton.js";
 import {
   abortChatRunById,
-  type ChatAbortControllerEntry,
   isChatAbortControllerEntryAbortable,
   removeChatAbortControllerEntry,
   type RestartRecoveryCandidate,
 } from "./chat-abort.js";
+import type { ChatAbortControllerEntry } from "./chat-abort.types.js";
 import { abortQueuedChatTurns, type QueuedChatTurnMap } from "./chat-queued-turns.js";
 import {
   collectGatewayProcessMemoryUsageMb,
@@ -688,6 +687,8 @@ async function closeHttpListener(params: {
 
 export function createGatewayCloseHandler(
   params: {
+    closePluginRegistry: () => Promise<void>;
+    releasePluginMetadata: () => boolean;
     bonjourStop: (() => Promise<void>) | null;
     tailscaleCleanup: (() => Promise<void>) | null;
     clearSecretsRuntimeSnapshot?: (() => void) | null;
@@ -1078,18 +1079,20 @@ export function createGatewayCloseHandler(
       });
     } finally {
       await params.finishRequestEntries?.();
-      await shutdownStep("plugin-host-registry", clearActivePluginRegistry, warnings);
-      // Channel and plugin teardown still resolve account credentials. Keep the
-      // active snapshot until every teardown owner is done, then always scrub it.
-      try {
-        // Plugin cleanup may still read ambient slots. A failed owner drain must
-        // stop restart so the next lifecycle cannot reuse incomplete shutdown.
-        await drainGlobalSingletonLifecycleState(restartExpectedMs === null ? "close" : "restart");
-      } finally {
+      await shutdownStep("plugin-host-registry", params.closePluginRegistry, warnings);
+      // Releasing the final kernel lease elects one closer, including concurrent
+      // shutdowns. A sibling startup still owns a lease before its registry exists.
+      if (params.releasePluginMetadata()) {
         try {
-          params.clearSecretsRuntimeSnapshot?.();
-        } catch {
-          /* ignore */
+          await drainGlobalSingletonLifecycleState(
+            restartExpectedMs === null ? "close" : "restart",
+          );
+        } finally {
+          try {
+            params.clearSecretsRuntimeSnapshot?.();
+          } catch {
+            /* ignore */
+          }
         }
       }
     }

@@ -99,6 +99,7 @@ class PluginsPage extends OpenClawLightDomElement {
     { controller: AbortController; timeout: ReturnType<typeof setTimeout> }
   >();
   private iconAuthCandidates: string[] = [];
+  private pluginGeneration: number | undefined;
   private readonly gateway = new GatewayPageController(this, {
     getGateway: () => this.context?.gateway,
     onIdentityChange: () => {
@@ -213,6 +214,9 @@ class PluginsPage extends OpenClawLightDomElement {
 
   private handleGatewaySnapshot(change: GatewayPageChange) {
     const snapshot = change.snapshot;
+    const generation = snapshot.pluginCapabilities?.generation;
+    const pluginsChanged = generation !== undefined && generation !== this.pluginGeneration;
+    this.pluginGeneration = generation;
     const nextIconAuthCandidates = resolveControlUiAuthCandidates({
       hello: snapshot.hello,
       settings: { token: this.context.gateway.connection.token },
@@ -226,7 +230,7 @@ class PluginsPage extends OpenClawLightDomElement {
     this.iconAuthCandidates = nextIconAuthCandidates;
     const shouldRefreshAfterChange =
       !change.initial &&
-      (change.identityChanged || change.connectionChanged || iconAuthChanged) &&
+      (change.identityChanged || change.connectionChanged || iconAuthChanged || pluginsChanged) &&
       snapshot.phase === "connected" &&
       this.routeDataConsumed;
     if (
@@ -653,12 +657,12 @@ class PluginsPage extends OpenClawLightDomElement {
       rowKey,
       (client) => uninstallPlugin(client, pluginId),
       async (result, refreshError, client, _isCurrent, isLatest) => {
-        // Removal hides its row, so keep the restart reminder on the page.
+        // Removal hides its row, so retain the operation outcome on the page.
         if (isLatest()) {
           this.pageNotice = {
             kind: "success",
             text: [
-              t("pluginsPage.removedRestart", { name: result.pluginId }),
+              t("pluginsPage.removedSuccess", { name: result.pluginId }),
               ...(result.warnings ?? []).map((warning) => formatUiExternalText(warning)),
               refreshError ? t("pluginsPage.configRefreshFailed", { error: refreshError }) : null,
             ]
@@ -721,6 +725,7 @@ class PluginsPage extends OpenClawLightDomElement {
           onRetryConsentInspection: () => void this.consentController.inspect(),
           onDismissMessage: (rowKey) => this.setMessage(rowKey, null),
           onUninstall: (pluginId, rowKey) => void this.uninstall(pluginId, rowKey),
+          onReload: (pluginId, rowKey) => void this.consentController.reload(pluginId, rowKey),
           onSearchClawHub: (query) => this.openClawHubSearch(query),
         })}
       `)}

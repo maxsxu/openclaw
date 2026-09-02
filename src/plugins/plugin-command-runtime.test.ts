@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createChannelTestPluginBase, createTestRegistry } from "../test-utils/channel-plugins.js";
 const getCurrentPluginConversationBinding = vi.hoisted(() => vi.fn(async () => null));
-const cleanupReplacedPluginHostRegistry = vi.hoisted(() =>
-  vi.fn(async () => ({ cleanupCount: 0, failures: [] })),
+const createPluginHostRegistryRetirement = vi.hoisted(() =>
+  vi.fn(() => async () => ({ cleanupCount: 0, failures: [] })),
 );
 
-vi.mock("./host-hook-cleanup.js", () => ({ cleanupReplacedPluginHostRegistry }));
+vi.mock("./host-hook-cleanup.js", () => ({ createPluginHostRegistryRetirement }));
 vi.mock("./conversation-binding.js", () => ({
   getCurrentPluginConversationBinding,
   requestPluginConversationBinding: vi.fn(),
@@ -77,7 +77,7 @@ function requirePluginDispatch(
 }
 
 afterEach(() => {
-  cleanupReplacedPluginHostRegistry.mockClear();
+  createPluginHostRegistryRetirement.mockClear();
   getCurrentPluginConversationBinding.mockClear();
   resetPluginRuntimeStateForTest();
 });
@@ -143,7 +143,7 @@ describe("plugin command runtime", () => {
 
     await clearActivePluginRegistry();
 
-    expect(cleanupReplacedPluginHostRegistry).toHaveBeenCalledOnce();
+    expect(createPluginHostRegistryRetirement).toHaveBeenCalledOnce();
   });
 
   it("binds the request-scoped registry and scopes provider aliases", async () => {
@@ -433,11 +433,11 @@ describe("plugin command runtime", () => {
     });
     await Promise.resolve();
     expect(clearSettled).toBe(false);
-    expect(cleanupReplacedPluginHostRegistry).not.toHaveBeenCalled();
+    expect(createPluginHostRegistryRetirement).not.toHaveBeenCalled();
     release();
     await expect(running).resolves.toEqual({ text: "done" });
     await clearing;
-    expect(cleanupReplacedPluginHostRegistry).toHaveBeenCalledOnce();
+    expect(createPluginHostRegistryRetirement).toHaveBeenCalledOnce();
   });
 
   it("lets repeated command-triggered clears return without deadlocking their drain", async () => {
@@ -458,7 +458,7 @@ describe("plugin command runtime", () => {
     );
     await expect(dispatch.execute(executionContext)).resolves.toEqual({ text: "cleared" });
     await clearActivePluginRegistry();
-    expect(cleanupReplacedPluginHostRegistry).toHaveBeenCalledOnce();
+    expect(createPluginHostRegistryRetirement).toHaveBeenCalledOnce();
   });
 
   it("awaits cleanup from detached handler context after execution settles", async () => {
@@ -469,12 +469,12 @@ describe("plugin command runtime", () => {
       releaseDetached = resolve;
     });
     let releaseCleanup!: () => void;
-    cleanupReplacedPluginHostRegistry.mockImplementationOnce(
-      async () =>
-        await new Promise<{ cleanupCount: number; failures: [] }>((resolve) => {
-          releaseCleanup = () => resolve({ cleanupCount: 0, failures: [] });
-        }),
-    );
+    createPluginHostRegistryRetirement.mockImplementationOnce(() => {
+      const cleanup = new Promise<{ cleanupCount: number; failures: [] }>((resolve) => {
+        releaseCleanup = () => resolve({ cleanupCount: 0, failures: [] });
+      });
+      return () => cleanup;
+    });
     let detachedClear!: Promise<void>;
     registerCommand(registry, {
       pluginId: "detached",
@@ -495,7 +495,7 @@ describe("plugin command runtime", () => {
     await expect(dispatch.execute(executionContext)).resolves.toEqual({ text: "scheduled" });
     expect(getPluginCommandExecutionCount(registry)).toBe(0);
     releaseDetached();
-    await vi.waitFor(() => expect(cleanupReplacedPluginHostRegistry).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(createPluginHostRegistryRetirement).toHaveBeenCalledOnce());
     let clearSettled = false;
     void detachedClear.then(() => {
       clearSettled = true;

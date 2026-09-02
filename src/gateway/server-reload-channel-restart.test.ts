@@ -6,7 +6,7 @@ import { resetGatewayWorkAdmission } from "../process/gateway-work-admission.js"
 import { createChannelTestPluginBase, createTestRegistry } from "../test-utils/channel-plugins.js";
 import type { ChannelKind } from "./config-reload-plan.js";
 import { createChannelManager, type ChannelManager } from "./server-channels.js";
-import { rollbackStoppedGatewayChannels } from "./server-reload-channel-restart.js";
+import { restartGatewayChannels } from "./server-reload-channel-restart.js";
 
 let manager: ChannelManager | undefined;
 afterEach(async () => {
@@ -21,7 +21,7 @@ it.each(
     (["idle", "stopped", "racing"] as const).map((state) => ({ scope, state })),
   ),
 )(
-  "$scope rollback preserves $state manual stops while explicit starts resume",
+  "$scope config reload preserves $state manual stops while explicit starts resume",
   async ({ scope, state }) => {
     const starts: string[] = [];
     const configuring = createDeferred();
@@ -69,21 +69,29 @@ it.each(
       scope === "accounts" ? [["discord", new Set(["manual", "running"])]] : [],
     );
     const logChannels = { info: vi.fn(), error: vi.fn() };
-    const reload = rollbackStoppedGatewayChannels(
-      { startChannel: manager.startChannel, logChannels },
-      channels,
-      accounts,
-      "cancelled plugin reload",
-    );
+    const scheduleRecoveryRestart = vi.fn();
+    const reload = restartGatewayChannels({
+      params: { startChannel: manager.startChannel, stopChannel: manager.stopChannel, logChannels },
+      nextConfig: {},
+      channelsToRestart: channels,
+      restartChannelAccounts: accounts,
+      activePluginChannelsAfterReload: null,
+      shouldSkipChannelRestart: false,
+      skipChannelRestartLogMessage: "",
+      isLifecycleReloadAborted: () => false,
+      getChannelAutostartSuppression: () => null,
+      channelReloadTargets: () => channels,
+      logSuppressedChannelRestart: vi.fn(),
+      scheduleRecoveryRestart,
+    });
     if (state === "racing") {
       await configuring.promise;
       await manager.stopChannel("discord", "manual");
       blockConfiguration = false;
       releaseConfiguration.resolve();
     }
-    expect(await reload).toEqual([]);
-    expect(channels.size).toBe(0);
-    expect(accounts.size).toBe(0);
+    await reload;
+    expect(scheduleRecoveryRestart).not.toHaveBeenCalled();
     expect(logChannels.error).not.toHaveBeenCalled();
     expect(manager.isManuallyStopped("discord", "manual")).toBe(true);
     expect(manager.getRuntimeSnapshot().channelAccounts.discord?.manual?.running).toBe(false);
