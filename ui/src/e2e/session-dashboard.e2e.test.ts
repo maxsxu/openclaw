@@ -1,6 +1,7 @@
 // Control UI E2E covers the real session-dashboard provider and transcript bridge.
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { WORKBOARD_STATUSES, type WorkboardCard } from "@openclaw/workboard-contract";
 import type { Page } from "playwright";
 import { expect, it } from "vitest";
 import { GATEWAY_SERVER_CAPS } from "../../../packages/gateway-protocol/src/index.js";
@@ -67,6 +68,16 @@ function workboardConfigSnapshot(enabled = true) {
     raw: JSON.stringify(config),
     resolved: config,
     sourceConfig: config,
+  };
+}
+
+function workboardCardsListResponse(cards: WorkboardCard[]) {
+  return {
+    cards,
+    boards: [
+      { id: "platform", total: cards.length, active: cards.length, archived: 0, byStatus: {} },
+    ],
+    statuses: WORKBOARD_STATUSES,
   };
 }
 
@@ -508,7 +519,7 @@ suite.define(() => {
         : {}),
     });
     const page = await context.newPage();
-    const readyCard = {
+    const readyCard: WorkboardCard = {
       id: "card-widget-ready",
       title: "Rebase plugin widget kinds",
       sessionKey,
@@ -521,7 +532,25 @@ suite.define(() => {
       agentId: "main",
       metadata: { automation: { boardId: "platform" } },
     };
-    const runningCard = { ...readyCard, status: "running", position: 2_000, updatedAt: 3 };
+    const refreshedCard = {
+      ...readyCard,
+      title: "Refreshed while the dashboard is hidden",
+      updatedAt: 3,
+    };
+    const runningCard: WorkboardCard = {
+      ...refreshedCard,
+      status: "running",
+      position: 2_000,
+      updatedAt: 4,
+    };
+    const alreadyRunningCard: WorkboardCard = {
+      ...readyCard,
+      id: "card-widget-running",
+      title: "Already running",
+      sessionKey: undefined,
+      status: "running",
+      position: 1_000,
+    };
     const gateway = await installMockGateway(page, {
       ...workboardUi,
       sessionKey,
@@ -539,20 +568,7 @@ suite.define(() => {
       ],
       methodResponses: {
         "board.get": pluginWidgetBoardSnapshot,
-        "workboard.cards.list": {
-          cards: [
-            readyCard,
-            {
-              ...readyCard,
-              id: "card-widget-running",
-              title: "Already running",
-              sessionKey: undefined,
-              status: "running",
-              position: 1_000,
-            },
-          ],
-          statuses: ["ready", "running", "done"],
-        },
+        "workboard.cards.list": workboardCardsListResponse([readyCard, alreadyRunningCard]),
         "workboard.cards.move": { card: runningCard },
       },
     });
@@ -604,29 +620,37 @@ suite.define(() => {
           ),
         )
         .toBe(true);
-      expect(await cardWidget.count()).toBe(1);
+      await gateway.setMethodResponse(
+        "workboard.cards.list",
+        workboardCardsListResponse([refreshedCard, alreadyRunningCard]),
+      );
       await gateway.emitGatewayEvent("plugin.workboard.changed", {
         epoch: "plugin-widget-e2e-hidden",
         revision: 2,
       });
+      await expect.poll(() => accessory.textContent()).toContain(refreshedCard.title);
       await page.evaluate(
         () =>
           new Promise<void>((resolve) => {
             requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
           }),
       );
-      expect(await gateway.getRequests("workboard.cards.list")).toHaveLength(listCountBeforeHide);
+      // The visible chat header refreshes its catalog; retained dashboard widgets stay paused.
+      expect(await gateway.getRequests("workboard.cards.list")).toHaveLength(
+        listCountBeforeHide + 1,
+      );
+      expect(await cardWidget.count()).toBe(1);
 
       await gateway.emitGatewayEvent("board.command", {
         sessionKey,
         command: { kind: "focus_tab", tabId: "main" },
       });
-      // The shared widget runtime and the session-header lookup each resume
-      // their own read; hidden updates must not refresh either owner.
+      // Both resumed widget views share one read; the visible header keeps its current lookup.
       await expect
         .poll(async () => (await gateway.getRequests("workboard.cards.list")).length)
         .toBe(listCountBeforeHide + 2);
-      await expect.poll(() => accessory.textContent()).toContain(readyCard.title);
+      await expect.poll(() => cardWidget.textContent()).toContain(refreshedCard.title);
+      await expect.poll(() => accessory.textContent()).toContain(refreshedCard.title);
       const reopenedCardElement = page.locator("openclaw-plugin-view").filter({ has: cardWidget });
       await expect
         .poll(() =>
@@ -647,20 +671,10 @@ suite.define(() => {
         position: 2_000,
       });
       await expect.poll(() => cardWidget.textContent()).toContain("Running");
-      await gateway.setMethodResponse("workboard.cards.list", {
-        cards: [
-          runningCard,
-          {
-            ...readyCard,
-            id: "card-widget-running",
-            title: "Already running",
-            sessionKey: undefined,
-            status: "running",
-            position: 1_000,
-          },
-        ],
-        statuses: ["ready", "running", "done"],
-      });
+      await gateway.setMethodResponse(
+        "workboard.cards.list",
+        workboardCardsListResponse([runningCard, alreadyRunningCard]),
+      );
       await gateway.emitGatewayEvent("plugin.workboard.changed", {
         epoch: "plugin-widget-e2e",
         revision: 2,
@@ -707,7 +721,7 @@ suite.define(() => {
         "workboard.cards.list",
         "workboard.cards.move",
       ];
-      const card = {
+      const card: WorkboardCard = {
         id: "card-widget-ready",
         title: "Read-only dashboard card",
         status: "ready",
@@ -727,10 +741,7 @@ suite.define(() => {
         sessionKey,
         methodResponses: {
           "board.get": pluginWidgetBoardSnapshot,
-          "workboard.cards.list": {
-            cards: [card],
-            statuses: ["ready", "running", "done"],
-          },
+          "workboard.cards.list": workboardCardsListResponse([card]),
         },
       });
       await showDashboard(page);
@@ -766,7 +777,7 @@ suite.define(() => {
         : {}),
     });
     const page = await context.newPage();
-    const card = {
+    const card: WorkboardCard = {
       id: "card-dashboard-stitch",
       title: "Ship dashboard stitch",
       status: "running",
@@ -795,7 +806,7 @@ suite.define(() => {
         "board.get": boardSnapshot,
         "config.get": workboardConfigSnapshot(),
         "tasks.list": { nextCursor: null, tasks: [] },
-        "workboard.cards.list": { cards: [card], statuses: ["running", "done"] },
+        "workboard.cards.list": workboardCardsListResponse([card]),
       },
     });
     await showDashboard(page);
@@ -818,31 +829,28 @@ suite.define(() => {
         });
       }
 
-      const completedCard = { ...card, status: "done", updatedAt: 3 };
-      await gateway.setMethodResponse("workboard.cards.list", {
-        cards: [completedCard],
-        statuses: ["running", "done"],
-      });
+      const completedCard: WorkboardCard = { ...card, status: "done", updatedAt: 3 };
+      await gateway.setMethodResponse(
+        "workboard.cards.list",
+        workboardCardsListResponse([completedCard]),
+      );
       await gateway.emitGatewayEvent("plugin.workboard.changed", {
         epoch: "cardboard-e2e",
         revision: 2,
       });
       await expect.poll(() => chip.textContent()).toContain("Done");
 
-      await gateway.setMethodResponse("workboard.cards.list", {
-        cards: [],
-        statuses: ["running", "done"],
-      });
+      await gateway.setMethodResponse("workboard.cards.list", workboardCardsListResponse([]));
       await gateway.emitGatewayEvent("plugin.workboard.changed", {
         epoch: "cardboard-e2e",
         revision: 3,
       });
       await expect.poll(() => chip.count()).toBe(0);
 
-      await gateway.setMethodResponse("workboard.cards.list", {
-        cards: [completedCard],
-        statuses: ["running", "done"],
-      });
+      await gateway.setMethodResponse(
+        "workboard.cards.list",
+        workboardCardsListResponse([completedCard]),
+      );
       await gateway.emitGatewayEvent("plugin.workboard.changed", {
         epoch: "cardboard-e2e",
         revision: 4,
@@ -895,7 +903,7 @@ suite.define(() => {
     }
   });
 
-  it("omits the Workboard breadcrumb when its plugin or the session board is unavailable", async () => {
+  it("links Workboard cards without dashboard widgets and omits the disabled plugin", async () => {
     const cases = [
       {
         name: "plugin disabled",
@@ -926,23 +934,20 @@ suite.define(() => {
           methodResponses: {
             "board.get": testCase.board,
             "config.get": testCase.config,
-            "workboard.cards.list": {
-              cards: [
-                {
-                  id: `card-${testCase.name.replaceAll(" ", "-")}`,
-                  title: testCase.name,
-                  status: "running",
-                  priority: "normal",
-                  labels: [],
-                  position: 1,
-                  createdAt: 1,
-                  updatedAt: 2,
-                  sessionKey,
-                  metadata: { automation: { boardId: "platform" } },
-                },
-              ],
-              statuses: ["running"],
-            },
+            "workboard.cards.list": workboardCardsListResponse([
+              {
+                id: `card-${testCase.name.replaceAll(" ", "-")}`,
+                title: testCase.name,
+                status: "running",
+                priority: "normal",
+                labels: [],
+                position: 1,
+                createdAt: 1,
+                updatedAt: 2,
+                sessionKey,
+                metadata: { automation: { boardId: "platform" } },
+              },
+            ]),
           },
         });
         await showDashboard(page);
@@ -951,8 +956,17 @@ suite.define(() => {
         await expect
           .poll(async () => (await gateway.getRequests("board.get")).length)
           .toBeGreaterThan(0);
-        await expect.poll(() => page.locator(".workboard-session-chip").count()).toBe(0);
-        expect(await gateway.getRequests("workboard.cards.list")).toHaveLength(0);
+        const chip = page.locator(".workboard-session-chip");
+        if (testCase.native) {
+          await expect.poll(() => chip.textContent()).toContain(testCase.name);
+          expect(new URL((await chip.getAttribute("href"))!, suite.server.baseUrl).pathname).toBe(
+            "/workboard/platform",
+          );
+          expect(await gateway.getRequests("workboard.cards.list")).toHaveLength(1);
+        } else {
+          await expect.poll(() => chip.count()).toBe(0);
+          expect(await gateway.getRequests("workboard.cards.list")).toHaveLength(0);
+        }
       });
     }
   });
