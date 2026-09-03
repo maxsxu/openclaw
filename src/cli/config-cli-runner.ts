@@ -223,7 +223,10 @@ function configApplyHintForOperations(
   if (paths.length === 0) {
     return "No gateway restart needed.";
   }
-  const plan = buildGatewayReloadPlan(paths, { candidateConfig: afterConfig });
+  const plan = buildGatewayReloadPlan(paths, {
+    previousConfig: beforeConfig,
+    candidateConfig: afterConfig,
+  });
   if (
     plan.restartGateway ||
     (plan.hotReasons.length > 0 && resolveGatewayReloadSettings(afterConfig).mode === "off")

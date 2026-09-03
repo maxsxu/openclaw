@@ -5097,6 +5097,65 @@ describe("config cli", () => {
     const pluginApplyHint =
       "Plugin changes follow the Gateway reload policy. To reload explicitly, run: openclaw plugins reload <id>.";
 
+    it.each([
+      {
+        name: "same-mode token rotation",
+        auth: { mode: "token", token: "previous-token" },
+        reloadMode: "hybrid",
+        configPath: "gateway.auth.token",
+        value: "next-token",
+        restart: false,
+      },
+      {
+        name: "same-mode password rotation",
+        auth: { mode: "password", password: "previous-password" },
+        reloadMode: "hybrid",
+        configPath: "gateway.auth.password",
+        value: "next-password",
+        restart: false,
+      },
+      {
+        name: "rotation with automatic reload disabled",
+        auth: { mode: "token", token: "previous-token" },
+        reloadMode: "off",
+        configPath: "gateway.auth.token",
+        value: "next-token",
+        restart: true,
+      },
+      {
+        name: "authentication mode change",
+        auth: { mode: "token", token: "previous-token", password: "previous-password" },
+        reloadMode: "hybrid",
+        configPath: "gateway.auth.mode",
+        value: "password",
+        restart: true,
+      },
+    ] as const)(
+      "reports the actual reload requirement for $name",
+      async ({ auth, reloadMode, configPath, value, restart }) => {
+        const config: OpenClawConfig = { gateway: { auth, reload: { mode: reloadMode } } };
+        setSnapshot(config, config);
+        const { buildGatewayReloadPlan } = await import("../gateway/config-reload-plan.js");
+        const realPlanner = await vi.importActual<
+          typeof import("../gateway/config-reload-plan.js")
+        >("../gateway/config-reload-plan.js");
+
+        const planner = vi.mocked(buildGatewayReloadPlan);
+        planner.mockImplementation(realPlanner.buildGatewayReloadPlan);
+        try {
+          await runConfigSet(configPath, value);
+
+          expect(mockWriteConfigFile).toHaveBeenCalledTimes(1);
+          const restartHint = "Restart the gateway to apply.";
+          const hotHint = "Change will apply without restarting the gateway.";
+          expectLogIncludes(restart ? restartHint : hotHint);
+          expectLogExcludes(restart ? hotHint : restartHint);
+        } finally {
+          planner.mockReset();
+        }
+      },
+    );
+
     it("prints No change without writing for a same-value config set", async () => {
       setGatewaySnapshot();
 
