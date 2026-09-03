@@ -190,14 +190,11 @@ function startTranscriptsAutoStartEntry(
     forgetCapture(capture);
   };
 
-  const startContinuous = (
-    entry: ResolvedTranscriptsAutoStartConfig & { sessionId: string },
-    attempt: number,
-  ) => {
-    if (stopped || startedSessions.has(entry.sessionId)) {
+  const startContinuous = (sessionId: string, attempt: number) => {
+    if (stopped || startedSessions.has(sessionId)) {
       return;
     }
-    const capture = { sessionId: entry.sessionId, lifecycleToken: Symbol(entry.sessionId) };
+    const capture = { sessionId, lifecycleToken: Symbol(sessionId) };
     // Failed startup can retain a live producer; reserve its cleanup owner before awaiting it.
     startedSessions.set(capture.sessionId, capture.lifecycleToken);
     void runPending(async (controller) => {
@@ -209,7 +206,7 @@ function startTranscriptsAutoStartEntry(
           startupWaitMs: AUTO_START_PROVIDER_READY_TIMEOUT_MS,
           configuredLifecycle: true,
           lifecycleToken: capture.lifecycleToken,
-          rawParams: { action: "start", ...entry },
+          rawParams: { action: "start", ...entry, sessionId },
         });
       } catch (error) {
         forgetCapture(capture);
@@ -222,7 +219,7 @@ function startTranscriptsAutoStartEntry(
             `transcripts autoStart failed provider=${entry.providerId}: ${formatAutoStopDiagnostic(error)} (${cleanupPending ? "capture cleanup pending; check the provider, then reload its plugin to retry cleanup and auto-start" : "check the transcripts.autoStart entry in your config"})`,
           );
         } else {
-          schedule(() => startContinuous(entry, attempt + 1), AUTO_START_RETRY_MS);
+          schedule(() => startContinuous(sessionId, attempt + 1), AUTO_START_RETRY_MS);
         }
       }
     });
@@ -464,7 +461,7 @@ function startTranscriptsAutoStartEntry(
   if (entry.whenOccupied) {
     watchEntry();
   } else {
-    startContinuous({ ...entry, sessionId: entry.sessionId ?? createTranscriptSessionId() }, 1);
+    startContinuous(entry.sessionId ?? createTranscriptSessionId(), 1);
   }
   return async (strict) => {
     stopped = true;

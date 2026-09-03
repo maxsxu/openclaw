@@ -323,7 +323,7 @@ describe("continuous transcript startup ownership", () => {
 
           // The same canonical stop must acknowledge cleanup before auto-start can resume.
           const previousStops = stop.mock.calls.length;
-          stop.mockImplementation(async ({ sessionId }) => ({ ok: true, sessionId }));
+          stop.mockImplementation(async (request) => ({ ok: true, sessionId: request.sessionId }));
           await service.stop(affected);
           expect(stop).toHaveBeenCalledTimes(previousStops + 1);
           await expect(execute("status")).resolves.toMatchObject({ details: { active: [] } });

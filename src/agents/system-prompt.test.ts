@@ -1357,12 +1357,16 @@ describe("buildAgentSystemPrompt", () => {
         delegate: true,
       },
     ]).flatMap((surface) =>
-      (["full", "minimal"] as const).map((promptMode) => ({ ...surface, promptMode })),
+      (["full", "minimal"] as const).map((promptMode) => ({
+        name: surface.name,
+        surface,
+        promptMode,
+      })),
     ),
-  )("routes plugin and system changes for $name ($promptMode)", (surface) => {
+  )("routes plugin and system changes for $name ($promptMode)", ({ surface, promptMode }) => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",
-      promptMode: surface.promptMode,
+      promptMode,
       toolNames: surface.toolNames,
       capabilityToolNames: surface.capabilityToolNames,
       codeModeActive: surface.codeModeActive,

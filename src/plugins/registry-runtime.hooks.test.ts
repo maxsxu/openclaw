@@ -38,8 +38,8 @@ describe("plugin runtime dispatch ownership", () => {
       const runtime = createPluginRuntime({ hooks: { dispatchHookAgentTurn } });
       runtime.subagent.complete = complete;
       const completionRequest = { agentId: hookTurn.agentId, message: hookTurn.message };
-      const captureCall = (runtime: PluginRuntime) => {
-        const surface = runtime[ownership.surface];
+      const captureCall = (scopedRuntime: PluginRuntime) => {
+        const surface = scopedRuntime[ownership.surface];
         return async () =>
           "dispatchHookAgentTurn" in surface
             ? await surface.dispatchHookAgentTurn(hookTurn)

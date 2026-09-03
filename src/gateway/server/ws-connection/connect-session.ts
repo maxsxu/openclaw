@@ -75,10 +75,6 @@ type AuthenticatedNodePairingAdmission = NonNullable<
   authenticated: { nodeId: string; publicKey: string; token: string };
 };
 
-function isReleasedVersion(version: string): boolean {
-  return RELEASED_VERSION_RE.test(version);
-}
-
 export async function attachAuthenticatedGatewayConnect(
   context: GatewayConnectPhaseContext,
   state: DeviceAuthorizedGatewayConnect,
@@ -487,8 +483,8 @@ export async function attachAuthenticatedGatewayConnect(
         clientVersion &&
         gatewayVersion &&
         clientVersion !== gatewayVersion &&
-        isReleasedVersion(gatewayVersion) &&
-        isReleasedVersion(clientVersion)
+        RELEASED_VERSION_RE.test(gatewayVersion) &&
+        RELEASED_VERSION_RE.test(clientVersion)
       ) {
         logWsControl.info(
           `node version mismatch conn=${connId} client=${formatForLog(clientLabel)} clientVersion=${formatForLog(clientVersion)} gatewayVersion=${gatewayVersion}; closing for supervisor restart`,
