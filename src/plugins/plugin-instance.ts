@@ -164,8 +164,7 @@ export class PluginInstance implements PluginInstanceHandle {
     return this.invoke(run);
   }
 
-  private invoke<T>(run: () => T, joinDisposal = true): T {
-    const { token, release } = this.lease(joinDisposal);
+  private invoke<T>(run: () => T, { token, release } = this.lease()): T {
     try {
       const value = this.enter(token, run);
       if (isPromiseLike(value)) {
@@ -337,6 +336,9 @@ export class PluginInstance implements PluginInstanceHandle {
     const { token, release } = this.lease();
     let active = true;
     let iterating = 0;
+    // Stream helpers and queued protocol calls keep their admitted token until
+    // their promises and protocol result inspection have both settled.
+    let pendingOperations = 0;
     let consumerSettled = false;
     let terminalSettled = true;
     let completion: Promise<void> | undefined;
@@ -347,17 +349,22 @@ export class PluginInstance implements PluginInstanceHandle {
       }
       return completion;
     };
+    const finishWhenSettled = () => {
+      if (consumerSettled && terminalSettled && pendingOperations === 0) {
+        return finish();
+      }
+      return undefined;
+    };
+    const releaseOperation = () => {
+      pendingOperations -= 1;
+      return finishWhenSettled();
+    };
     const invoke = <T>(run: () => T): T => {
       if (!active || !this.calls.has(token)) {
         throw new Error(`Plugin ${this.pluginId} stream is closed`);
       }
-      return this.enter(token, run);
-    };
-    const finishWhenSettled = () => {
-      if (consumerSettled && terminalSettled) {
-        return finish();
-      }
-      return undefined;
+      pendingOperations += 1;
+      return this.invoke(run, { token, release: releaseOperation });
     };
     // EventStream consumers commonly await result() after iteration has ended.
     // Capture that terminal promise while admitted; later reads execute no plugin code.
@@ -388,21 +395,25 @@ export class PluginInstance implements PluginInstanceHandle {
         return cached;
       }
       iterating += 1;
+      consumerSettled = false;
       let done = false;
+      const completedReturn = async (value: unknown) => ({ done: true, value: await value });
       const settle = () => {
         if (!done) {
           done = true;
           if (--iterating === 0) {
             consumerSettled = true;
-            return finishWhenSettled();
           }
         }
-        return undefined;
       };
       const view: object = new Proxy(Object.create(Object.getPrototypeOf(iterator)), {
         get: (_item, method) => {
           if (method === Symbol.asyncIterator) {
             return () => view;
+          }
+          // Completed return is protocol cleanup, not renewed plugin admission.
+          if (method === "return" && done) {
+            return completedReturn;
           }
           const value = readPluginMember(iterator, method, invoke);
           if (typeof value !== "function") {
@@ -414,18 +425,23 @@ export class PluginInstance implements PluginInstanceHandle {
               invoke(() => this.wrapResult(Reflect.apply(value, iterator, args)));
           }
           return async (...args: unknown[]) => {
-            try {
-              const next: IteratorResult<unknown> = await invoke(() =>
-                this.wrapResult(Reflect.apply(value, iterator, args)),
-              );
-              if (invoke(() => next?.done)) {
-                await settle();
-              }
-              return next;
-            } catch (error) {
-              await settle()?.catch(() => {});
-              throw error;
+            if (method === "return" && done) {
+              return completedReturn(args[0]);
             }
+            return invoke(async () => {
+              try {
+                const next: IteratorResult<unknown> = await this.wrapResult(
+                  Reflect.apply(value, iterator, args),
+                );
+                if (invoke(() => next?.done)) {
+                  settle();
+                }
+                return next;
+              } catch (error) {
+                settle();
+                throw error;
+              }
+            });
           };
         },
       });
@@ -447,6 +463,10 @@ export class PluginInstance implements PluginInstanceHandle {
               }
               return undefined;
             });
+        }
+        const iterator = iterators.get(source);
+        if (key === "return" && iterator) {
+          return Reflect.get(iterator, key);
         }
         const value = readPluginMember(source, key, invoke);
         if (typeof value !== "function") {
@@ -596,7 +616,7 @@ export class PluginInstance implements PluginInstanceHandle {
       try {
         // Their resources are still live; this internal lease cannot join the
         // disposal promise that is itself waiting for these hooks to finish.
-        await this.invoke(beforeCleanup, false);
+        await this.invoke(beforeCleanup, this.lease(false));
       } catch (error) {
         failures.push(error);
       }

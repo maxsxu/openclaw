@@ -4,7 +4,7 @@ import { shouldRejectHardlinkedPluginFiles } from "../hardlink-policy.js";
 import { getPluginInstance } from "../plugin-instance-scope.js";
 import { resolvePluginMetadataSnapshot } from "../plugin-metadata-snapshot.js";
 import { resolvePluginRootPublicSurfacePath } from "../public-surface-runtime.js";
-import { getPluginRegistryForContext } from "../runtime-state.js";
+import { getPluginRegistryForContext } from "../runtime-context.js";
 
 function readColdPluginRecords() {
   let config;

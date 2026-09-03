@@ -17,7 +17,7 @@ import { getPluginInstance } from "../plugin-instance-scope.js";
 import { resolvePluginMetadataSnapshot } from "../plugin-metadata-snapshot.js";
 import { createEmptyPluginRegistry } from "../registry-empty.js";
 import type { PluginRecord } from "../registry-types.js";
-import { getPluginRegistryForContext } from "../runtime-state.js";
+import { getPluginRegistryForContext } from "../runtime-context.js";
 import { resetPluginRuntimeStateForTest, stageActivePluginRegistry } from "../runtime.js";
 import { createPluginRecord } from "../status.test-fixtures.js";
 import { withPluginRuntimeGatewayRequestScope } from "./gateway-request-scope.js";

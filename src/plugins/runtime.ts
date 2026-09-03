@@ -26,12 +26,9 @@ import {
 } from "./registry-lifecycle.js";
 import type { PluginRegistry } from "./registry-types.js";
 import { getActivePluginChannelRegistrySnapshotFromState } from "./runtime-channel-state.js";
-import {
-  getPluginRegistryForContext,
-  PLUGIN_REGISTRY_STATE,
-  type RegistryState,
-} from "./runtime-state.js";
-export { getPluginRegistryForContext } from "./runtime-state.js";
+import { getPluginRegistryForContext } from "./runtime-context.js";
+import { PLUGIN_REGISTRY_STATE, type RegistryState } from "./runtime-state.js";
+export { getPluginRegistryForContext } from "./runtime-context.js";
 
 const log = createSubsystemLogger("plugins/runtime");
 const retirements = resolveGlobalSingleton(

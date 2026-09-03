@@ -14,7 +14,7 @@ import {
   loadPluginPublicSurfaceModule,
   loadPluginPublicSurfaceModuleSync,
 } from "../plugins/plugin-module-loader-cache.js";
-import { getPluginRegistryForContext } from "../plugins/runtime-state.js";
+import { getPluginRegistryForContext } from "../plugins/runtime-context.js";
 import { resolveLoaderPackageRoot } from "../plugins/sdk-alias.js";
 import {
   createFacadeResolutionKey,

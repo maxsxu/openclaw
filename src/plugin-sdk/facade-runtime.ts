@@ -6,7 +6,7 @@ import { areBundledPluginsDisabled, resolveBundledPluginsDir } from "../plugins/
 import { getPluginCacheRoot, getPluginCacheSource } from "../plugins/plugin-cache.js";
 import { getPluginInstance } from "../plugins/plugin-instance-scope.js";
 import { getCachedPluginSourceModuleLoader } from "../plugins/plugin-module-loader-cache.js";
-import { getPluginRegistryForContext } from "../plugins/runtime-state.js";
+import { getPluginRegistryForContext } from "../plugins/runtime-context.js";
 import { resolveLoaderPackageRoot } from "../plugins/sdk-alias.js";
 import {
   loadBundledPluginPublicSurfaceModuleSyncCore as loadBundledPluginPublicSurfaceModuleSyncLight,

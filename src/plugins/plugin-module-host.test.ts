@@ -110,12 +110,22 @@ describe("plugin module generation", () => {
     await expect(a.lazy()).rejects.toThrow("module host is disposed");
   });
 
-  it("shares SDK identity and keeps createRequire, cycles and module globals in one realm", () => {
+  it("shares SDK identity and keeps createRequire, cycles and module globals in one realm", async () => {
     const root = fixture({
       "entry.ts": `import { createRequire } from "node:module";
         import nodeProcess from "node:process";
         import { token } from "openclaw/plugin-sdk/fixture";
         import { readFileSync } from "node:fs";
+        import { once } from "node:events";
+        export const exception = new DOMException("module aborted", "AbortError");
+        const controller = new AbortController();
+        export const target = new EventTarget();
+        export const event = new Event("ready");
+        export const received = once(target, "ready", { signal: controller.signal });
+        target.dispatchEvent(event);
+        controller.abort();
+        export const abortReason = controller.signal.reason;
+        export const abortReasonMatches = abortReason instanceof DOMException;
         const local = createRequire(import.meta.url);
         export const result = [local("./a.cjs"), local("./a.cjs"), token,
           readFileSync(new URL("./asset.txt", import.meta.url), "utf8"),
@@ -129,13 +139,29 @@ describe("plugin module generation", () => {
     const token = {};
     const a = host(root, (specifier: string) =>
       specifier === "openclaw/plugin-sdk/fixture" ? { token } : requireHost(specifier),
-    ).load("entry.ts") as { result: unknown[] };
+    ).load("entry.ts") as {
+      result: unknown[];
+      exception: DOMException;
+      target: EventTarget;
+      event: Event;
+      received: Promise<Event[]>;
+      abortReason: DOMException;
+      abortReasonMatches: boolean;
+    };
     expect(a.result[0]).toEqual({ name: "a", peer: "b", loads: 1 });
     expect(a.result[0]).toBe(a.result[1]);
     expect(a.result[2]).toBe(token);
     expect(a.result[3]).toBe("asset-one");
     expect(a.result[4]).toBe(a.result[0]);
     expect(a.result[5]).toBe(true);
+    expect(a.exception.constructor).toBe(DOMException);
+    expect(a.exception).toMatchObject({ name: "AbortError", message: "module aborted" });
+    expect(a.abortReason).toBeInstanceOf(DOMException);
+    expect(a.abortReason.name).toBe("AbortError");
+    expect(a.abortReasonMatches).toBe(true);
+    expect(a.target.constructor).toBe(EventTarget);
+    expect(a.event.constructor).toBe(Event);
+    expect(await a.received).toEqual([a.event]);
     const b = host(root).load("a.cjs");
     expect(b).toEqual({ name: "a", peer: "b", loads: 1 });
     expect(b).not.toBe(a.result[0]);

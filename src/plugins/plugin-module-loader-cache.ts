@@ -25,7 +25,7 @@ import { capturePluginGenerationArtifact } from "./plugin-generation-artifact.js
 import { getPluginInstance, type PluginInstanceHandle } from "./plugin-instance-scope.js";
 import { createPluginModuleHost } from "./plugin-module-host.js";
 import { installOpenClawInternalCorePackageNativeResolver } from "./plugin-sdk-native-resolver.js";
-import { resolvePluginRuntimeRecord } from "./runtime-state.js";
+import { resolvePluginRuntimeRecord } from "./runtime-context.js";
 import { getPluginRuntimeGatewayRequestScope } from "./runtime/gateway-request-scope.js";
 import {
   buildPluginLoaderJitiOptions,

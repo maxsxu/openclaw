@@ -11,7 +11,7 @@ import {
   resolveBundledPluginSourcePublicSurfacePath,
   resolvePluginRootPublicSurfacePath,
 } from "../plugins/public-surface-runtime.js";
-import { getPluginRegistryForContext } from "../plugins/runtime-state.js";
+import { getPluginRegistryForContext } from "../plugins/runtime-context.js";
 
 /** Resolved facade module path plus the package/plugin root that bounds imports. */
 export type FacadeModuleLocationLike = {

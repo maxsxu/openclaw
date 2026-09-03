@@ -268,6 +268,9 @@ describe("managed plugin instances", () => {
       (value) => value,
     );
     const stream = instance.wrap(() => source)();
+    for (const method of ["next", "return", "throw"]) {
+      expect(Reflect.get(stream, method)).toBeUndefined();
+    }
     const iterator = stream[Symbol.asyncIterator]();
     source.push("chunk");
     await expect(iterator.next()).resolves.toEqual({ value: "chunk", done: false });
@@ -383,6 +386,49 @@ describe("managed plugin instances", () => {
     expect(read).toHaveBeenCalledOnce();
   });
 
+  it.each(["source", "iterator"] as const)(
+    "joins an admitted async %s helper after its cursor ends",
+    async (target) => {
+      const instance = new PluginInstance("stream-helper");
+      const proceed = createDeferredCore();
+      const events: string[] = [];
+      const cleaned = vi.fn(() => {
+        events.push("cleanup");
+      });
+      instance.lifecycle.onDispose(cleaned);
+      const read = instance.wrap(() => "owned value");
+      const inspect = async () => {
+        await proceed.promise;
+        const value = read();
+        events.push("helper");
+        return value;
+      };
+      const source = Object.assign(
+        (async function* () {
+          yield "chunk";
+        })(),
+        { inspect },
+      );
+      const stream = instance.wrap({ [Symbol.asyncIterator]: () => source, inspect });
+      const iterator = stream[Symbol.asyncIterator]();
+      const pending = target === "source" ? stream.inspect() : iterator.inspect();
+      try {
+        await expect(iterator.next()).resolves.toEqual({ value: "chunk", done: false });
+        await expect(iterator.next()).resolves.toEqual({ value: undefined, done: true });
+        const disposing = instance.dispose();
+        await Promise.resolve();
+        expect(cleaned).not.toHaveBeenCalled();
+        proceed.resolve();
+        await expect(pending).resolves.toBe("owned value");
+        await disposing;
+        expect(events).toEqual(["helper", "cleanup"]);
+      } finally {
+        proceed.resolve();
+        await Promise.allSettled([pending, iterator.return(undefined), instance.dispose()]);
+      }
+    },
+  );
+
   it("releases a directly consumed async generator when its consumer returns early", async () => {
     const instance = new PluginInstance("iterator");
     const finished = vi.fn();
@@ -402,6 +448,57 @@ describe("managed plugin instances", () => {
     await instance.dispose();
   });
 
+  it.each(["completion", "failure"] as const)(
+    "permits terminal return after %s without reentering plugin code",
+    async (outcome) => {
+      const instance = new PluginInstance("terminal-return");
+      const finished = vi.fn();
+      const failure = new Error("generator failed");
+      const source = (async function* () {
+        try {
+          yield "chunk";
+          if (outcome === "failure") {
+            throw failure;
+          }
+          return "original result";
+        } finally {
+          finished();
+        }
+      })();
+      const originalReturn = source.return.bind(source);
+      const readReturn = vi.fn(() => originalReturn);
+      Object.defineProperty(source, "return", { get: readReturn });
+      const stream = instance.wrap(source);
+      const iterator = stream[Symbol.asyncIterator]();
+      const retainedReturn = iterator.return.bind(iterator);
+      try {
+        await expect(iterator.next()).resolves.toEqual({ done: false, value: "chunk" });
+        if (outcome === "failure") {
+          await expect(iterator.next()).rejects.toBe(failure);
+        } else {
+          await expect(iterator.next()).resolves.toEqual({ done: true, value: "original result" });
+        }
+        await instance.dispose();
+        for (const getClose of [
+          () => retainedReturn,
+          () => iterator.return.bind(iterator),
+          () => stream.return.bind(stream),
+        ]) {
+          await expect(getClose()(Promise.resolve("closed"))).resolves.toEqual({
+            done: true,
+            value: "closed",
+          });
+        }
+        expect(readReturn).toHaveBeenCalledOnce();
+        expect(finished).toHaveBeenCalledOnce();
+        await expect(iterator.next()).rejects.toThrow("stream is closed");
+        await expect(iterator.throw(failure)).rejects.toThrow("stream is closed");
+      } finally {
+        await instance.dispose();
+      }
+    },
+  );
+
   it("waits for a stream's independent terminal result after its iterator ends", async () => {
     const instance = new PluginInstance("terminal-stream");
     const terminal = createDeferredCore<string>();
@@ -420,8 +517,12 @@ describe("managed plugin instances", () => {
     }
     await Promise.resolve();
     expect(drained).toBe(false);
+    const second = stream[Symbol.asyncIterator]();
+    await expect(second.next()).resolves.toEqual({ value: "chunk", done: false });
     terminal.resolve("final");
     await expect(stream.result()).resolves.toBe("final");
+    expect(drained).toBe(false);
+    await expect(second.next()).resolves.toEqual({ value: undefined, done: true });
     await draining;
     await instance.dispose();
   });
@@ -509,6 +610,7 @@ describe("managed plugin instances", () => {
     expect(instance.lifecycle.signal.aborted).toBe(true);
     expect(cleaned).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
+    await expect(stream.return(undefined)).rejects.toThrow("stream is closed");
     await expect(stream.next()).rejects.toThrow("stream is closed");
     expect(resumedStream).not.toHaveBeenCalled();
     pending.resolve();
