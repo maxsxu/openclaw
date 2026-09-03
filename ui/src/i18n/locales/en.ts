@@ -11,6 +11,7 @@ export const en: TranslationMap & {
   devices: TranslationMap;
   desktop: TranslationMap &
     Record<"title" | "openWindow" | "unavailable" | "toggle" | "reconnect", string>;
+  pluginsPage: TranslationMap;
   updates: TranslationMap;
 } = {
   capacityMeter: {
@@ -3013,36 +3014,7 @@ export const en: TranslationMap & {
     connectorAddedEndpoint:
       "Added {name}. Update the endpoint and credentials in MCP settings before use.",
     connectorAddedReady: "Added {name}. New agent sessions can use it right away.",
-    connectorDescriptions: {
-      notion: "Search, create, and update pages and databases in your Notion workspace.",
-      linear: "Triage issues, update cycles, and file bugs straight from chat.",
-      todoist: "Read, add, and complete tasks and projects in Todoist.",
-      airtable: "Query and update records, tables, and bases in Airtable.",
-      jira: "Create, search, and triage Jira tickets from chat.",
-      canva: "Create and edit Canva designs, manage assets, and export results.",
-      stripe: "Check payments, customers, invoices, and subscriptions in your Stripe account.",
-      googleCalendar: "Read, create, and get briefed on events — your agent owns your schedule.",
-      email: "Mailbox triage, summaries, and drafts with send-on-approval.",
-      pdf: "Extract, merge, convert, and OCR PDF documents.",
-      transcription: "Turn audio and video into clean, structured transcripts.",
-      github: "PR review queues, issue triage, and repo Q&A through the official GitHub MCP.",
-      sentry: "Crash alerts explained and triaged the moment they fire.",
-      context7: "Version-specific library docs and code examples while coding. No signup needed.",
-      deepwiki: "Ask questions about any public GitHub repo. Free, no account needed.",
-      huggingFace: "Search models, datasets, and papers; run Spaces as tools.",
-      grafana: "Grafana know-how and community connectors for dashboards and alerts.",
-      kubernetes: "Cluster operations and troubleshooting from chat.",
-      homeAssistant: "Control lights, climate, and automations across your whole home.",
-      spotify: "Search, queue, and soundtrack your day with mood-based playlists.",
-      sonos: "Whole-home audio: play, group rooms, and queue by chat.",
-      reddit: "Browse, search, and summarize subreddits and threads.",
-      markets: "Live stocks and crypto with price alerts and daily digests.",
-      travel: "Flight and hotel search with fare watching and trip memory.",
-      news: "A personalized daily briefing: news, weather, and tasks in one message.",
-      maps: "Places, routing, and travel-time answers.",
-      translation: "Translate and localize text and documents.",
-      notes: "Capture notes to Markdown, Obsidian, Notion, or Bear.",
-    },
+    connectorDescriptions: {},
     noInstalledTitle: "No optional plugins installed",
     noInstalledBody: "Discover a featured plugin or search ClawHub to extend OpenClaw.",
     noInstalledMatchTitle: "No installed plugins match",

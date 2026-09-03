@@ -488,6 +488,7 @@ describe("renderPlugins", () => {
 
     const github = container.querySelector<HTMLElement>('[data-connector-id="github"]');
     expect(normalizedText(github)).toContain("MCP");
+    expect(normalizedText(github)).toContain("PR review queues, issue triage, and repo Q&A");
     github?.querySelector<HTMLButtonElement>(".settings-row__control button")?.click();
     expect(onAddConnector).toHaveBeenCalledWith(
       CONNECTOR_SUGGESTIONS.find((connector) => connector.id === "github"),
