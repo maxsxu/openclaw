@@ -75,6 +75,38 @@ describe("runCodexAppServerAttempt plugin refresh", () => {
         path.join(tempDir, "session.jsonl"),
         path.join(tempDir, "workspace"),
       );
+      const providerRoot = path.join(tempDir, "native-normalization-probe");
+      const providerLoaded = path.join(providerRoot, "loaded");
+      await fs.mkdir(providerRoot);
+      await fs.writeFile(
+        path.join(providerRoot, "package.json"),
+        JSON.stringify({
+          name: "native-normalization-probe",
+          version: "1.0.0",
+          openclaw: { extensions: ["./index.cjs"] },
+        }),
+      );
+      await fs.writeFile(
+        path.join(providerRoot, "openclaw.plugin.json"),
+        JSON.stringify({
+          id: "native-normalization-probe",
+          providers: ["codex"],
+          configSchema: { type: "object", properties: {}, additionalProperties: false },
+        }),
+      );
+      await fs.writeFile(
+        path.join(providerRoot, "index.cjs"),
+        `require("node:fs").writeFileSync(${JSON.stringify(providerLoaded)}, "loaded");
+module.exports = { register(api) { api.registerProvider({ id: "codex", label: "Native normalization probe", auth: [], normalizeToolSchemas(context) { return context.tools; } }); } };\n`,
+      );
+      params.config = {
+        ...params.config,
+        plugins: {
+          allow: ["codex", "native-normalization-probe"],
+          load: { paths: [providerRoot] },
+          entries: { "native-normalization-probe": { enabled: true } },
+        },
+      };
       const originalTask = "Edit the plugin helper, reload it, and verify its changed schema.";
       const earlierReceipt = "b606e205-0413-49c0-b3a3-250a6c941596";
       const siblingReceipt = "f682dc20-0c5d-494a-bb6f-17cabd08be86";
@@ -373,6 +405,7 @@ describe("runCodexAppServerAttempt plugin refresh", () => {
           method: "thread/unsubscribe",
           params: { threadId: "thread-1" },
         });
+        await expect(fs.readFile(providerLoaded, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
       } finally {
         releaseSibling.resolve();
         closeHostCapabilities();
