@@ -126,13 +126,17 @@ function runPlugin(
   });
 }
 
-function runOwnedPlugin(
+async function runOwnedPlugin(
   context: PreparedCliRunContext,
   execute: CliBackendExecute,
   options: Parameters<typeof runPlugin>[2] = {},
 ) {
   const instance = new PluginInstance("cli-execution");
-  return runPlugin(context, instance.wrap(execute), options).finally(() => instance.dispose());
+  try {
+    return await runPlugin(context, instance.wrap(execute), options);
+  } finally {
+    await instance.dispose();
+  }
 }
 
 function registerOwnerSession(context: PreparedCliRunContext, generation: string) {
