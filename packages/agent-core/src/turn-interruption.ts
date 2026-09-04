@@ -2,9 +2,7 @@ import type { AssistantMessage, Model, StreamFn } from "@openclaw/llm-core";
 import type { AgentEvent, AgentMessage } from "./types.js";
 
 type RunEventEmitter = (event: AgentEvent) => Promise<void> | void;
-type RunFailureContext = {
-  failure?: { origin: "runtime" | "provider"; value: unknown };
-};
+type RunFailureContext = Array<{ origin: "runtime" | "provider"; value: unknown }>;
 
 const failureContexts = new WeakMap<RunEventEmitter, RunFailureContext>();
 
@@ -15,31 +13,31 @@ export function recordRunFailure(
   error: unknown,
 ): void {
   const context = failureContexts.get(emit);
-  if (context) {
-    context.failure ??= { origin, value: error };
+  // Cleanup can replace a failure, and an abort can later relay an earlier one.
+  // Keep the first origin of each value until this run is disposed.
+  if (context && !context.some((failure) => Object.is(failure.value, error))) {
+    context.push({ origin, value: error });
   }
 }
 
 function rethrowRunFailure(
-  context: RunFailureContext,
+  emit: RunEventEmitter,
   origin: "runtime" | "provider",
   error: unknown,
 ): never {
-  // Iterator cleanup can fail while a listener error is already unwinding.
-  // Preserve the original boundary's origin, even when both throw the same value.
-  context.failure ??= { origin, value: error };
+  recordRunFailure(emit, origin, error);
   throw error;
 }
 
 /** Keep failure attribution inside one synthesizing run without changing thrown values. */
 export function createRunFailureContext(emit: RunEventEmitter) {
-  const context: RunFailureContext = {};
+  const context: RunFailureContext = [];
   const trackedEmit: RunEventEmitter = (event) => {
     try {
       const pending = emit(event);
-      return pending?.catch((error: unknown) => rethrowRunFailure(context, "runtime", error));
+      return pending?.catch((error: unknown) => rethrowRunFailure(trackedEmit, "runtime", error));
     } catch (error) {
-      return rethrowRunFailure(context, "runtime", error);
+      return rethrowRunFailure(trackedEmit, "runtime", error);
     }
   };
   failureContexts.set(trackedEmit, context);
@@ -48,7 +46,7 @@ export function createRunFailureContext(emit: RunEventEmitter) {
     createMessage(model: Model, error: unknown, aborted: boolean): AssistantMessage {
       const message = createFailureMessage(model, error, aborted);
       const providerFailure =
-        context.failure?.origin === "provider" && Object.is(context.failure.value, error);
+        context.find((failure) => Object.is(failure.value, error))?.origin === "provider";
       if (!aborted && !providerFailure) {
         message.diagnostics = [{ type: "synthesized_run_failure", timestamp: message.timestamp }];
       }
@@ -56,15 +54,14 @@ export function createRunFailureContext(emit: RunEventEmitter) {
     },
     dispose() {
       failureContexts.delete(trackedEmit);
-      delete context.failure;
+      context.length = 0;
     },
   };
 }
 
 /** Observe provider operations separately from the runtime callbacks consuming their events. */
 export function startRunProviderStream(emit: RunEventEmitter, start: () => ReturnType<StreamFn>) {
-  const context = failureContexts.get(emit);
-  if (!context) {
+  if (!failureContexts.has(emit)) {
     return start();
   }
   return (async () => {
@@ -72,21 +69,21 @@ export function startRunProviderStream(emit: RunEventEmitter, start: () => Retur
     try {
       response = await start();
     } catch (error) {
-      rethrowRunFailure(context, "provider", error);
+      rethrowRunFailure(emit, "provider", error);
     }
     return {
       async *[Symbol.asyncIterator]() {
         try {
           yield* response;
         } catch (error) {
-          rethrowRunFailure(context, "provider", error);
+          rethrowRunFailure(emit, "provider", error);
         }
       },
       async result() {
         try {
           return await response.result();
         } catch (error) {
-          return rethrowRunFailure(context, "provider", error);
+          return rethrowRunFailure(emit, "provider", error);
         }
       },
     };

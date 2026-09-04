@@ -462,12 +462,21 @@ describe("steering failure ownership", () => {
     },
   );
 
-  it.each(["callback", "cleanup", "callback-steer", "callback-continuation"] as const)(
+  it.each([
+    "callback",
+    "cleanup",
+    "callback-steer",
+    "callback-continuation",
+    "iterator-continuation",
+    "result-continuation",
+    "iterator-cleanup",
+  ] as const)(
     "preserves %s origin and raw rejection through public loop APIs",
     async (boundary) => {
       const failure = Object.freeze(new Error("opaque callback failure"));
+      const earlierFailure = new Error("earlier provider failure");
       for (const raw of [false, true]) {
-        const cleanup = vi.fn(() => boundary === "cleanup" && throwFailure(failure));
+        const cleanup = vi.fn(() => boundary.endsWith("cleanup") && throwFailure(failure));
         const callback = vi.fn<NonNullable<StreamOptions["onActiveResponse"]>>((control) => {
           if (boundary === "callback") {
             throwFailure(failure);
@@ -493,12 +502,16 @@ describe("steering failure ownership", () => {
           return {
             async *[Symbol.asyncIterator](): AsyncGenerator<AssistantMessageEvent> {
               try {
+                if (boundary.startsWith("iterator-")) {
+                  throwFailure(earlierFailure);
+                }
                 yield { type: "done", reason: "stop", message: assistant("done") };
               } finally {
                 disconnect?.();
               }
             },
-            result: async () => assistant("done"),
+            result: async () =>
+              boundary === "result-continuation" ? throwFailure(earlierFailure) : assistant("done"),
           };
         };
         if (raw) {
@@ -514,10 +527,11 @@ describe("steering failure ownership", () => {
           ).rejects.toBe(failure);
         } else {
           const messages = await collectLoop(config, streamFn);
-          expectFailureOrigin(messages, !boundary.startsWith("callback-"), failure);
+          const provider = boundary === "callback-steer" || boundary.endsWith("continuation");
+          expectFailureOrigin(messages, !provider, failure);
         }
         expect(callback).toHaveBeenCalledOnce();
-        expect(cleanup).toHaveBeenCalledTimes(boundary === "cleanup" ? 1 : 0);
+        expect(cleanup).toHaveBeenCalledTimes(boundary.startsWith("callback") ? 0 : 1);
       }
     },
   );
@@ -558,8 +572,8 @@ describe("steering failure ownership", () => {
     },
   );
 
-  it.each(["batch", "listener", "commit"] as const)(
-    "retains runtime origin when async %s failure aborts provider iteration with the same value",
+  it.each(["batch", "listener", "commit", "cleanup-relay"] as const)(
+    "retains runtime origin through async %s failure and provider abort relay",
     async (boundary) => {
       for (const failure of [
         "opaque async failure",
@@ -567,6 +581,8 @@ describe("steering failure ownership", () => {
       ]) {
         for (const raw of [false, true]) {
           const closed = vi.fn();
+          const cleanupFailure = new Error("intervening runtime cleanup failure");
+          let consumedCleanup: unknown;
           const result = vi.fn(async () => assistant("unused"));
           const execute = vi.fn(async () => ({ content: [], details: {} }));
           const commitReadyCalls = vi.fn(() => throwFailure(failure));
@@ -596,11 +612,14 @@ describe("steering failure ownership", () => {
           const config: AgentLoopConfig = {
             model,
             convertToLlm: (messages) => messages as Message[],
+            ...(boundary === "cleanup-relay"
+              ? { onActiveResponse: () => () => throwFailure(cleanupFailure) }
+              : {}),
             ...(boundary !== "listener"
               ? {
                   beforeToolBatch: async () => {
                     await setImmediate();
-                    return boundary === "batch"
+                    return boundary !== "commit"
                       ? throwFailure(failure)
                       : attachInternalToolBatchLifecycle(
                           {},
@@ -611,6 +630,7 @@ describe("steering failure ownership", () => {
               : {}),
           };
           const streamFn: StreamFn = (_model, _context, options) => {
+            const disconnect = options?.onActiveResponse?.({ steer: async () => false });
             const signal = options?.signal;
             if (!signal) {
               throw new Error("expected the provider execution signal");
@@ -629,6 +649,11 @@ describe("steering failure ownership", () => {
                     partial: { ...assistant(""), content: [toolCall] },
                   };
                   await aborted.promise;
+                  try {
+                    disconnect?.();
+                  } catch (error) {
+                    consumedCleanup = error;
+                  }
                   throwFailure(signal.reason);
                 } finally {
                   signal.removeEventListener("abort", onAbort);
@@ -661,6 +686,7 @@ describe("steering failure ownership", () => {
           expect(execute).not.toHaveBeenCalled();
           expect(result).not.toHaveBeenCalled();
           expect(closed).toHaveBeenCalledOnce();
+          expect(consumedCleanup).toBe(boundary === "cleanup-relay" ? cleanupFailure : undefined);
           if (boundary === "commit") {
             expect(commitReadyCalls).toHaveBeenCalledExactlyOnceWith([
               { toolCallId: "lookup", args: {} },
