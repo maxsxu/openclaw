@@ -159,7 +159,7 @@ export function createPluginRuntimeResolver(state: PluginRegistryState) {
     };
     const assertRuntimeCurrent = () => {
       if (
-        !capturePluginLifecycleAuthority(registry, record, {
+        !capturePluginLifecycleAuthority(currentRegistry(), record, {
           scopedRuntime: registryParams.activateGlobalSideEffects === false,
         })?.()
       ) {

@@ -6,21 +6,14 @@ import { getPluginCache, type PluginCache } from "./plugin-cache.js";
 import { pluginInstanceState, resolvePluginInstanceOwner } from "./plugin-instance-scope.js";
 import type { PluginRecord, PluginRegistry } from "./registry-types.js";
 
-const {
-  retiredRegistries,
-  activatedRegistries,
-  registryEpochs,
-  preparation,
-  loaderCaches,
-  registryLoads,
-} = resolveGlobalSingleton(Symbol.for("openclaw.pluginRegistryLifecycle"), () => ({
-  retiredRegistries: new WeakSet<PluginRegistry>(),
-  activatedRegistries: new WeakSet<PluginRegistry>(),
-  registryEpochs: new WeakMap<PluginRegistry, object>(),
-  preparation: new AsyncLocalStorage<{ registry: PluginRegistry; active: boolean }>(),
-  loaderCaches: new WeakMap<PluginRegistry, Set<PluginLoaderCacheState<PluginRegistry>>>(),
-  registryLoads: new WeakMap<PluginCache, PluginLoaderCacheState<PluginRegistry>>(),
-}));
+const { retiredRegistries, registryEpochs, preparation, loaderCaches, registryLoads } =
+  resolveGlobalSingleton(Symbol.for("openclaw.pluginRegistryLifecycle"), () => ({
+    retiredRegistries: new WeakSet<PluginRegistry>(),
+    registryEpochs: new WeakMap<PluginRegistry, object>(),
+    preparation: new AsyncLocalStorage<{ registry: PluginRegistry; active: boolean }>(),
+    loaderCaches: new WeakMap<PluginRegistry, Set<PluginLoaderCacheState<PluginRegistry>>>(),
+    registryLoads: new WeakMap<PluginCache, PluginLoaderCacheState<PluginRegistry>>(),
+  }));
 
 export function getPluginLoaderCacheState(cache = getPluginCache()) {
   const cached = registryLoads.get(cache);
@@ -78,7 +71,6 @@ export function markPluginRegistryActive(registry: PluginRegistry | null | undef
   if (!registry) {
     return;
   }
-  activatedRegistries.add(registry);
   retiredRegistries.delete(registry);
   registryEpochs.set(registry, Object.freeze({}));
   adoptPluginRegistryRecords(registry);
@@ -109,8 +101,7 @@ export function isPluginRecordActive(registry: PluginRegistry, record: PluginRec
   const owner = getPluginRecordRegistry(registry, record);
   return (
     !pluginInstanceState.records.get(record)?.revoked &&
-    activatedRegistries.has(owner) &&
-    !retiredRegistries.has(owner) &&
+    registryEpochs.has(owner) &&
     owner.plugins.includes(record) &&
     record.enabled &&
     record.status === "loaded"
@@ -166,13 +157,13 @@ export function capturePluginLifecycleAuthority(
       (isPluginRecordActive(registry, record) ||
         isPluginRecordPreparing(registry, record) ||
         (options?.scopedRuntime === true &&
-          !activatedRegistries.has(registry) &&
+          !registryEpochs.has(registry) &&
           !retiredRegistries.has(registry) &&
           registry.plugins.includes(record) &&
           record.enabled &&
           record.status === "loaded"));
-    // Exact record ownership never revives after removal, so another epoch is redundant.
-    return usable() ? usable : undefined;
+    // Mint only from the current owner; retained closures follow legitimate adoption.
+    return owner.registry === registry && usable() ? usable : undefined;
   }
   const epoch = registryEpochs.get(registry);
   if ((!epoch && !options?.scopedRuntime) || retiredRegistries.has(registry)) {

@@ -121,10 +121,16 @@ describe("plugin instance publication", () => {
     const next = builder();
     next.registry.plugins.push(record);
     projectPluginContributions(first.registry, record, next.registry);
+    expect(sdk.capturePluginLifecycleAuthority(next.registry, record)).toBeUndefined();
+    expect(
+      sdk.capturePluginLifecycleAuthority(next.registry, record, { scopedRuntime: true }),
+    ).toBeUndefined();
     setActivePluginRegistry(next.registry);
     expect(sdk.getPluginRecordRegistry(first.registry, record)).toBe(next.registry);
     expect(getPluginRecordRegistry(first.registry, record)).toBe(next.registry);
     expect(authority()).toBe(true);
+    expect(sdk.capturePluginLifecycleAuthority(first.registry, record)).toBeUndefined();
+    expect(sdk.capturePluginLifecycleAuthority(next.registry, record)?.()).toBe(true);
     sdk.markPluginRegistryRetired(next.registry);
     expect(authority()).toBe(false);
     expect(capturePluginLifecycleAuthority(next.registry, record)).toBeUndefined();
