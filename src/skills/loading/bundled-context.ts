@@ -41,10 +41,8 @@ export function resolveBundledSkillsContext(
         `Skipping bundled skill with invalid frontmatter (${diagnostic.path}): ${diagnostic.message}`,
       ),
   });
-  for (const skill of result.skills) {
-    if (skill.name.trim()) {
-      names.add(skill.name);
-    }
+  for (const { skill } of result) {
+    names.add(skill.name);
   }
   cachedBundledContext = { dir, names: new Set(names) };
   return { dir, names };

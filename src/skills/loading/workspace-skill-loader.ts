@@ -29,6 +29,7 @@ import type {
   SkillEntry,
   SkillSnapshot,
 } from "../types.js";
+import { resolveWorkshopSkillsDir } from "../workshop/skills-root.js";
 import { resolveBundledSkillsDir } from "./bundled-dir.js";
 import { resolveBundledAllowlist, shouldIncludeSkill } from "./config.js";
 import {
@@ -36,7 +37,6 @@ import {
   resolveSkillInvocationPolicy,
   resolveSkillKey,
 } from "./frontmatter.js";
-import { readSkillFrontmatterSafe } from "./local-loader.js";
 import { resolvePluginSkillRoots, resolvePluginSkillRootsFromMetadata } from "./plugin-skills.js";
 import type { Skill } from "./skill-contract.js";
 import { compactSkillPath, resolveSkillsUserHomeDir } from "./skill-paths.js";
@@ -47,7 +47,6 @@ import {
   type LoadedSkillRecord,
 } from "./skill-root-loader.js";
 import { tryRealpath } from "./symlink-targets.js";
-import { loadWorkshopSkills } from "./workshop-skill-root-loader.js";
 
 const skillsLogger = createSubsystemLogger("skills");
 const CUSTODIAN_SKILLS_DIR_NAME = "custodian-skills";
@@ -64,7 +63,6 @@ type WorkspaceSkillRoots = {
 
 type WorkspaceSkillLoadOptions = {
   config?: OpenClawConfig;
-  workshopSkillsDir?: string;
   managedSkillsDir?: string;
   bundledSkillsDir?: string;
   pluginSkillsDir?: string;
@@ -205,7 +203,6 @@ function loadSkillEntries(
   opts?: {
     config?: OpenClawConfig;
     agentId?: string;
-    workshopSkillsDir?: string;
     managedSkillsDir?: string;
     bundledSkillsDir?: string;
     pluginSkillsDir?: string;
@@ -234,7 +231,6 @@ function loadSkillEntries(
     workspaceOnly,
     opts?.agentId ? normalizeAgentId(opts.agentId) : undefined,
     custodianAgentId,
-    opts?.workshopSkillsDir,
     opts?.managedSkillsDir,
     opts?.bundledSkillsDir,
     opts?.pluginSkillsDir,
@@ -303,12 +299,13 @@ function loadSkillEntries(
   const managedSkills = workspaceOnly
     ? []
     : loadSkills({ dir: managedSkillsDir, source: "openclaw-managed" });
-  const workshopSkills = loadWorkshopSkills({
-    config: opts?.config,
-    agentId: opts?.agentId,
-    workshopSkillsDir: opts?.workshopSkillsDir,
-    workspaceOnly,
-  });
+  const workshopSkills =
+    !workspaceOnly && opts?.config && opts.agentId
+      ? loadSkills({
+          dir: resolveWorkshopSkillsDir(opts.config, opts.agentId),
+          source: "openclaw-workshop",
+        })
+      : [];
   const personalAgentsSkillsDir = osHomeDir
     ? path.resolve(osHomeDir, ".agents", "skills")
     : path.resolve(".agents", "skills");
@@ -363,15 +360,7 @@ function loadSkillEntries(
     .toSorted((a, b) => a.skill.name.localeCompare(b.skill.name, "en"))
     .map((record) => {
       const skill = record.skill;
-      const frontmatter =
-        record.frontmatter ??
-        readSkillFrontmatterSafe({
-          rootDir: skill.baseDir,
-          filePath: skill.filePath,
-          maxBytes: limits.maxSkillFileBytes,
-          rejectHardlinks: record.rejectHardlinks,
-        }) ??
-        ({} as ParsedSkillFrontmatter);
+      const frontmatter = record.frontmatter;
       const invocation = resolveSkillInvocationPolicy(frontmatter);
       const entry: SkillEntry = {
         skill,
@@ -416,7 +405,6 @@ export function resolveWorkspaceSkillPromptEntries(
   workspaceDir: string,
   opts?: {
     config?: OpenClawConfig;
-    workshopSkillsDir?: string;
     managedSkillsDir?: string;
     bundledSkillsDir?: string;
     entries?: SkillEntry[];
@@ -509,13 +497,13 @@ export function loadVisibleSkills(
   workspaceDir: string,
   opts?: {
     config?: OpenClawConfig;
-    workshopSkillsDir?: string;
     managedSkillsDir?: string;
     bundledSkillsDir?: string;
     librarySelections?: SkillSnapshot["librarySelections"];
     skillFilter?: string[];
     skillOverrides?: Record<string, boolean>;
     agentId?: string;
+    agentSkillFilter?: "apply" | "ignore";
     eligibility?: SkillEligibilityContext;
     pluginMetadataSnapshot?: PluginMetadataSnapshot;
   },
