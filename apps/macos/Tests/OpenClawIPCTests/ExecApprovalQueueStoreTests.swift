@@ -453,8 +453,14 @@ struct ExecApprovalQueueStoreTests {
             systemRequests: { [ApprovalFixtureRequest(id: "system-pending", command: "echo recovered")] },
             advertisedMethods: supportsSystemList ? ["openclaw.approval.list"] : [])
         try await fixture.withStore { store in
+            let expectedIDs: Set<String> = supportsSystemList
+                ? ["exec-pending", "system-pending"]
+                : ["exec-pending"]
+            // Hello owns each list admission; an explicit refresh can start another
+            // after hello reconciliation finishes.
             store.start()
-            await store.refresh()
+            _ = try await fixture.gateway.acquireServerLease()
+            try #require(await self.waitUntil { Set(store.requests.map(\.id)) == expectedIDs })
             var captured: ExecApprovalQueueItem?
             if supportsSystemList {
                 let event = ApprovalFixtureRequest(id: "system-pending", command: "echo before-reconnect")
@@ -462,19 +468,20 @@ struct ExecApprovalQueueStoreTests {
                 try #require(await self.waitUntil {
                     store.requests.contains { $0.request.command == "echo before-reconnect" }
                 })
-                await store.refresh()
                 captured = try #require(store.requests.first { $0.kind == .systemAgent })
             }
 
             await fixture.gateway.shutdown()
-            await store.refresh()
+            try #require(await self.waitUntil { store.requests.isEmpty })
+            _ = try await fixture.gateway.acquireServerLease()
+            try #require(await self.waitUntil { Set(store.requests.map(\.id)) == expectedIDs })
             #expect(fixture.session.snapshotMakeCount() == 2)
             if let captured {
                 await store.resolve(request: captured, decision: .deny)
             }
             #expect(await fixture.requestLog.requests(method: "approval.resolve").isEmpty)
             #expect(await fixture.requestLog.requests(method: "openclaw.approval.list").count ==
-                (supportsSystemList ? 3 : 0))
+                (supportsSystemList ? 2 : 0))
 
             if supportsSystemList {
                 let recovered = try #require(store.requests.first { $0.kind == .systemAgent })

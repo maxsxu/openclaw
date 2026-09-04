@@ -8,18 +8,16 @@ struct ConfigStoreTests {
     @Test func `load uses remote in remote mode`() async {
         var localHit = false
         var remoteHit = false
-        await ConfigStore._testSetOverrides(.init(
+        let result = await self.withOverrides(.init(
             isRemoteMode: { true },
             loadLocal: { localHit = true
                 return ["local": true]
             },
             loadRemote: { remoteHit = true
                 return ["remote": true]
-            }))
-
-        let result = await ConfigStore.load()
-
-        await ConfigStore._testClearOverrides()
+            })) {
+                await ConfigStore.load()
+            }
         #expect(remoteHit)
         #expect(!localHit)
         #expect(result.root["remote"] as? Bool == true)
@@ -28,18 +26,16 @@ struct ConfigStoreTests {
     @Test func `load uses local in local mode`() async {
         var localHit = false
         var remoteHit = false
-        await ConfigStore._testSetOverrides(.init(
+        let result = await self.withOverrides(.init(
             isRemoteMode: { false },
             loadLocal: { localHit = true
                 return ["local": true]
             },
             loadRemote: { remoteHit = true
                 return ["remote": true]
-            }))
-
-        let result = await ConfigStore.load()
-
-        await ConfigStore._testClearOverrides()
+            })) {
+                await ConfigStore.load()
+            }
         #expect(localHit)
         #expect(!remoteHit)
         #expect(result.root["local"] as? Bool == true)
@@ -82,15 +78,14 @@ struct ConfigStoreTests {
     @Test func `save routes to local in local mode`() async throws {
         var localHit = false
         var remoteHit = false
-        await ConfigStore._testSetOverrides(.init(
+        try await self.withOverrides(.init(
             isRemoteMode: { false },
             loadLocal: { [:] },
             saveLocal: { _ in localHit = true },
             saveRemote: { _ in remoteHit = true }))
-
-        try await self.saveLoadedDocument(["local": true])
-
-        await ConfigStore._testClearOverrides()
+        {
+            try await self.saveLoadedDocument(["local": true])
+        }
         #expect(localHit)
         #expect(!remoteHit)
     }
@@ -132,41 +127,39 @@ struct ConfigStoreTests {
         let configPath = stateDir.appendingPathComponent("openclaw.json")
         defer { try? FileManager().removeItem(at: stateDir) }
 
-        try await TestIsolation.withEnvValues([
-            "OPENCLAW_STATE_DIR": stateDir.path,
-            "OPENCLAW_CONFIG_PATH": configPath.path,
-        ]) {
-            OpenClawConfigFile.saveDict([
-                "gateway": [
-                    "mode": "local",
-                    "auth": [
-                        "mode": "token",
-                        "token": "test-token", // pragma: allowlist secret
-                    ],
-                ],
-            ])
-            let before = try String(contentsOf: configPath, encoding: .utf8)
-            await ConfigStore._testSetOverrides(.init(
+        try await self.withOverrides(
+            .init(
                 isRemoteMode: { false },
                 loadLocal: { OpenClawConfigFile.loadDict() },
                 saveGateway: { _ in
                     throw NSError(domain: "Gateway", code: 0, userInfo: [
                         NSLocalizedDescriptionKey: "config changed since last load; re-run config.get and retry",
                     ])
-                }))
-
-            var didThrow = false
-            do {
-                try await self.saveLoadedDocument(["browser": ["enabled": false]])
-            } catch {
-                didThrow = true
+                }),
+            env: [
+                "OPENCLAW_STATE_DIR": stateDir.path,
+                "OPENCLAW_CONFIG_PATH": configPath.path,
+            ]) {
+                OpenClawConfigFile.saveDict([
+                    "gateway": [
+                        "mode": "local",
+                        "auth": [
+                            "mode": "token",
+                            "token": "test-token", // pragma: allowlist secret
+                        ],
+                    ],
+                ])
+                let before = try String(contentsOf: configPath, encoding: .utf8)
+                var didThrow = false
+                do {
+                    try await self.saveLoadedDocument(["browser": ["enabled": false]])
+                } catch {
+                    didThrow = true
+                }
+                #expect(didThrow)
+                let after = try String(contentsOf: configPath, encoding: .utf8)
+                #expect(after == before)
             }
-            await ConfigStore._testClearOverrides()
-
-            #expect(didThrow)
-            let after = try String(contentsOf: configPath, encoding: .utf8)
-            #expect(after == before)
-        }
     }
 
     @Test func `local save can fall back to protected direct write when gateway is unavailable`() async throws {
@@ -175,29 +168,28 @@ struct ConfigStoreTests {
         let configPath = stateDir.appendingPathComponent("openclaw.json")
         defer { try? FileManager().removeItem(at: stateDir) }
 
-        try await TestIsolation.withEnvValues([
-            "OPENCLAW_STATE_DIR": stateDir.path,
-            "OPENCLAW_CONFIG_PATH": configPath.path,
-        ]) {
-            await ConfigStore._testSetOverrides(.init(
+        try await self.withOverrides(
+            .init(
                 isRemoteMode: { false },
                 loadLocal: { OpenClawConfigFile.loadDict() },
                 saveGateway: { _ in
                     throw NSError(domain: "Gateway", code: 0, userInfo: [
                         NSLocalizedDescriptionKey: "gateway not configured",
                     ])
-                }))
-            try await self.saveLoadedDocument([
-                "gateway": ["mode": "local"],
-                "browser": ["enabled": false],
-            ])
-            await ConfigStore._testClearOverrides()
-
-            let data = try Data(contentsOf: configPath)
-            let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            #expect(((root?["browser"] as? [String: Any])?["enabled"] as? Bool) == false)
-            #expect((root?["meta"] as? [String: Any]) != nil)
-        }
+                }),
+            env: [
+                "OPENCLAW_STATE_DIR": stateDir.path,
+                "OPENCLAW_CONFIG_PATH": configPath.path,
+            ]) {
+                try await self.saveLoadedDocument([
+                    "gateway": ["mode": "local"],
+                    "browser": ["enabled": false],
+                ])
+                let data = try Data(contentsOf: configPath)
+                let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                #expect(((root?["browser"] as? [String: Any])?["enabled"] as? Bool) == false)
+                #expect((root?["meta"] as? [String: Any]) != nil)
+            }
     }
 
     private func saveLoadedDocument(_ root: [String: Any]) async throws {
@@ -208,16 +200,20 @@ struct ConfigStoreTests {
 
     private func withOverrides<T>(
         _ overrides: ConfigStore.Overrides,
+        env: [String: String?] = [:],
         _ body: () async throws -> T) async rethrows -> T
     {
-        await ConfigStore._testSetOverrides(overrides)
-        do {
-            let result = try await body()
-            await ConfigStore._testClearOverrides()
-            return result
-        } catch {
-            await ConfigStore._testClearOverrides()
-            throw error
+        // Origins and overrides share process state with other suites, even under .serialized.
+        try await TestIsolation.withIsolatedState(env: env) {
+            await ConfigStore._testSetOverrides(overrides)
+            do {
+                let result = try await body()
+                await ConfigStore._testClearOverrides()
+                return result
+            } catch {
+                await ConfigStore._testClearOverrides()
+                throw error
+            }
         }
     }
 }
