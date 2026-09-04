@@ -344,6 +344,7 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +2: owner-selected channel groups and their authored config path for safe recovery hints.
       // +1: canonical conversation-to-session binding read for native channel controls.
       // +1: final callable-tool availability projection for native harnesses.
+      // +1: provider-owned local-service reconciliation context.
       4377,
       env,
     ),
