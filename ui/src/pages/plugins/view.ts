@@ -663,42 +663,49 @@ function renderCatalogActions(
 ) {
   const detail = layout === "detail";
   return html`
-    ${plugin.installed
-      ? renderToggleButton(props, busy, {
-          enabled: plugin.enabled,
-          onToggle: (enabled) => props.onSetEnabled(plugin.id, enabled, rowKey),
-          className: detail ? (plugin.enabled ? "btn" : "btn primary") : "btn btn--sm",
-        })
-      : plugin.install
-        ? renderInstallButton(
-            props,
-            busy,
-            plugin.name,
-            plugin.install,
-            resolveInstallIdentity(props, plugin.install),
-          )
-        : detail
-          ? nothing
-          : html`<span class="plugins-action-note">${t("pluginsPage.unavailable")}</span>`}
-    ${plugin.installed
-      ? renderMutationButton(props, {
-          busy,
-          className: detail ? "btn" : "btn btn--sm",
-          label: t("pluginsPage.reload"),
-          onClick: () => props.onReload(plugin.id, rowKey),
-          stopPropagation: true,
-        })
-      : nothing}
-    ${plugin.removable && (plugin.installed || detail)
-      ? detail
+    ${
+      plugin.installed
+        ? renderToggleButton(props, busy, {
+            enabled: plugin.enabled,
+            onToggle: (enabled) => props.onSetEnabled(plugin.id, enabled, rowKey),
+            className: detail ? (plugin.enabled ? "btn" : "btn primary") : "btn btn--sm",
+          })
+        : plugin.install
+          ? renderInstallButton(
+              props,
+              busy,
+              plugin.name,
+              plugin.install,
+              resolveInstallIdentity(props, plugin.install),
+            )
+          : detail
+            ? nothing
+            : html`<span class="plugins-action-note">${t("pluginsPage.unavailable")}</span>`
+    }
+    ${
+      plugin.installed
         ? renderMutationButton(props, {
             busy,
-            className: "btn plugins-detail__remove",
-            label: html`<span aria-hidden="true">${icons.trash}</span> ${t("pluginsPage.remove")}`,
-            onClick: () => props.onUninstall(plugin.id, rowKey),
+            className: detail ? "btn" : "btn btn--sm",
+            label: t("pluginsPage.reload"),
+            onClick: () => props.onReload(plugin.id, rowKey),
+            stopPropagation: true,
           })
-        : renderRemoveButton(props, busy, plugin.name, () => props.onUninstall(plugin.id, rowKey))
-      : nothing}
+        : nothing
+    }
+    ${
+      plugin.removable && (plugin.installed || detail)
+        ? detail
+          ? renderMutationButton(props, {
+              busy,
+              className: "btn plugins-detail__remove",
+              label: html`<span aria-hidden="true">${icons.trash}</span>
+                ${t("pluginsPage.remove")}`,
+              onClick: () => props.onUninstall(plugin.id, rowKey),
+            })
+          : renderRemoveButton(props, busy, plugin.name, () => props.onUninstall(plugin.id, rowKey))
+        : nothing
+    }
   `;
 }
 
@@ -787,9 +794,7 @@ function renderPluginRow(
             ${plugin.name}
             ${
               plugin.version
-                ? includePackageName
-                  ? html`<span class="plugins-version">v${plugin.version}</span>`
-                  : html`<span class="plugins-version">v${plugin.version}</span>`
+                ? html`<span class="plugins-version">v${plugin.version}</span>`
                 : nothing
             }
           `,
@@ -809,11 +814,13 @@ function renderPluginRow(
         ${plugin.installed ? rowStateStatus(plugin) : nothing}
         ${renderCatalogActions(plugin, props, busy, key)}
       </div>
-      ${pluginError(plugin)
-        ? html`<div class="plugins-row-message plugins-row-message--error" role="alert">
-            ${formatUiExternalText(pluginError(plugin))}
-          </div>`
-        : nothing}
+      ${
+        pluginError(plugin)
+          ? html`<div class="plugins-row-message plugins-row-message--error" role="alert">
+              ${formatUiExternalText(pluginError(plugin))}
+            </div>`
+          : nothing
+      }
       ${renderRowMessage(key, props.messages[key], busy, props, installIdentity)}
     </article>
   `;
@@ -1244,9 +1251,11 @@ function renderDetailOverlay(props: PluginsViewProps) {
         <div class="plugins-detail__body">
           <div class="plugins-detail__title">
             <h2>${plugin.name}</h2>
-            ${plugin.version
-              ? html`<span class="plugins-version">v${plugin.version}</span>`
-              : nothing}
+            ${
+              plugin.version
+                ? html`<span class="plugins-version">v${plugin.version}</span>`
+                : nothing
+            }
             ${stateStatus(plugin)} ${runtimeStatus(plugin)}
           </div>
           <p class="plugins-detail__description">
@@ -1255,11 +1264,13 @@ function renderDetailOverlay(props: PluginsViewProps) {
           <div class="plugins-detail__actions">
             ${renderCatalogActions(plugin, props, busy, key, "detail")}
           </div>
-          ${pluginError(plugin)
-            ? html`<div class="plugins-row-message plugins-row-message--error" role="alert">
-                ${formatUiExternalText(pluginError(plugin))}
-              </div>`
-            : nothing}
+          ${
+            pluginError(plugin)
+              ? html`<div class="plugins-row-message plugins-row-message--error" role="alert">
+                  ${formatUiExternalText(pluginError(plugin))}
+                </div>`
+              : nothing
+          }
           ${renderRowMessage(key, props.messages[key], busy, props, installIdentity)}
           <div class="plugins-detail__meta">
             ${
