@@ -393,9 +393,11 @@ readiness requirements.
 
 `app/installed` readiness checks (with authorized metadata from batched
 `app/read`) are cached for one hour and refreshed
-asynchronously when stale. Codex thread app config is computed at Codex harness
-session establishment, not on every turn; use `/new`, `/reset`, or a gateway
-restart after changing native plugin config.
+asynchronously when stale. OpenClaw-managed conversations apply configured
+`codexPlugins` changes on the next message by rebuilding the native thread from
+the committed conversation. Imported or supervised native sessions preserve
+their existing thread and native tool catalog; start a new session to change
+that catalog.
 
 `codexPlugins.allow_all_plugins` snapshots every currently accessible account
 app into each new native Codex thread. It does not install plugins or apps, and
