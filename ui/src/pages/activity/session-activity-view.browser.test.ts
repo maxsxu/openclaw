@@ -1,5 +1,5 @@
 import { render } from "lit";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
 import type { ApplicationContext } from "../../app/context.ts";
 import "../../styles/base.css";
@@ -8,8 +8,17 @@ import "../../styles/settings.css";
 import "../../styles/activity.css";
 import { renderSessionActivityView } from "./session-activity-view.ts";
 
+let container: HTMLDivElement;
+
+beforeEach(() => {
+  // Own the Lit root: other browser suites may replace the shared body children.
+  container = document.createElement("div");
+  document.body.append(container);
+});
+
 afterEach(() => {
-  render(null, document.body);
+  render(null, container);
+  container.remove();
 });
 
 it.each([null, "person"])(
@@ -41,8 +50,8 @@ it.each([null, "person"])(
       onAutomationDayToggle: vi.fn(),
       onFiltersChange: vi.fn(),
     };
-    render(renderSessionActivityView(props), document.body);
-    const main = document.querySelector<HTMLElement>(".activity-feed__main")!;
+    render(renderSessionActivityView(props), container);
+    const main = container.querySelector<HTMLElement>(".activity-feed__main")!;
     const content = main.querySelector<HTMLElement>(
       personId ? "[data-activity-identity]" : ".activity-feed__summary",
     )!;
@@ -51,15 +60,12 @@ it.each([null, "person"])(
     expect(content.getBoundingClientRect().height).toBeGreaterThan(0);
 
     for (const loading of [true, false, true, false]) {
-      render(renderSessionActivityView({ ...props, loading }), document.body);
+      render(renderSessionActivityView({ ...props, loading }), container);
       expect(Math.abs(content.getBoundingClientRect().top - top)).toBeLessThan(1);
       expect(main.textContent).not.toContain("Loading");
     }
 
-    render(
-      renderSessionActivityView({ ...props, result: undefined, loading: true }),
-      document.body,
-    );
+    render(renderSessionActivityView({ ...props, result: undefined, loading: true }), container);
     expect(main.querySelector('[role="status"]')?.textContent).toContain("Loading");
   },
 );
