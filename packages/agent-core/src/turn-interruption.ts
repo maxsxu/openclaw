@@ -11,16 +11,18 @@ export function recordRunFailure(
   emit: RunEventEmitter,
   origin: "runtime" | "provider",
   error: unknown,
-): void {
+): "runtime" | "provider" | undefined {
   const context = failureContexts.get(emit);
   // Cleanup can replace a failure, and an abort can later relay an earlier one.
   // Keep the first origin of each value until this run is disposed.
-  if (context && !context.some((failure) => Object.is(failure.value, error))) {
+  const retained = context?.find((failure) => Object.is(failure.value, error));
+  if (context && !retained) {
     context.push({ origin, value: error });
   }
+  return context ? (retained?.origin ?? origin) : undefined;
 }
 
-function rethrowRunFailure(
+export function rethrowRunFailure(
   emit: RunEventEmitter,
   origin: "runtime" | "provider",
   error: unknown,
@@ -29,17 +31,24 @@ function rethrowRunFailure(
   throw error;
 }
 
-/** Keep failure attribution inside one synthesizing run without changing thrown values. */
+/** Keep failure attribution inside one run without changing thrown values. */
 export function createRunFailureContext(emit: RunEventEmitter) {
-  const context: RunFailureContext = [];
-  const trackedEmit: RunEventEmitter = (event) => {
-    try {
-      const pending = emit(event);
-      return pending?.catch((error: unknown) => rethrowRunFailure(trackedEmit, "runtime", error));
-    } catch (error) {
-      return rethrowRunFailure(trackedEmit, "runtime", error);
-    }
-  };
+  // High-level synthesis keeps the ledger until it has built its failure message.
+  // Direct loop APIs own and dispose the same context without adding synthesis.
+  const inherited = failureContexts.get(emit);
+  const context: RunFailureContext = inherited ?? [];
+  const trackedEmit: RunEventEmitter = inherited
+    ? emit
+    : (event) => {
+        try {
+          const pending = emit(event);
+          return pending?.catch((error: unknown) =>
+            rethrowRunFailure(trackedEmit, "runtime", error),
+          );
+        } catch (error) {
+          return rethrowRunFailure(trackedEmit, "runtime", error);
+        }
+      };
   failureContexts.set(trackedEmit, context);
   return {
     emit: trackedEmit,
@@ -53,6 +62,9 @@ export function createRunFailureContext(emit: RunEventEmitter) {
       return message;
     },
     dispose() {
+      if (inherited) {
+        return;
+      }
       failureContexts.delete(trackedEmit);
       context.length = 0;
     },
@@ -60,34 +72,32 @@ export function createRunFailureContext(emit: RunEventEmitter) {
 }
 
 /** Observe provider operations separately from the runtime callbacks consuming their events. */
-export function startRunProviderStream(emit: RunEventEmitter, start: () => ReturnType<StreamFn>) {
-  if (!failureContexts.has(emit)) {
-    return start();
+export async function startRunProviderStream(
+  emit: RunEventEmitter,
+  start: () => ReturnType<StreamFn>,
+) {
+  let response: Awaited<ReturnType<StreamFn>>;
+  try {
+    response = await start();
+  } catch (error) {
+    rethrowRunFailure(emit, "provider", error);
   }
-  return (async () => {
-    let response: Awaited<ReturnType<StreamFn>>;
-    try {
-      response = await start();
-    } catch (error) {
-      rethrowRunFailure(emit, "provider", error);
-    }
-    return {
-      async *[Symbol.asyncIterator]() {
-        try {
-          yield* response;
-        } catch (error) {
-          rethrowRunFailure(emit, "provider", error);
-        }
-      },
-      async result() {
-        try {
-          return await response.result();
-        } catch (error) {
-          return rethrowRunFailure(emit, "provider", error);
-        }
-      },
-    };
-  })();
+  return {
+    async *[Symbol.asyncIterator]() {
+      try {
+        yield* response;
+      } catch (error) {
+        rethrowRunFailure(emit, "provider", error);
+      }
+    },
+    async result() {
+      try {
+        return await response.result();
+      } catch (error) {
+        return rethrowRunFailure(emit, "provider", error);
+      }
+    },
+  };
 }
 
 /** Canonical empty aborted/error assistant recorded when a run ends without output. */

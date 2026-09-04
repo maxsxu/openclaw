@@ -173,6 +173,14 @@ export async function streamAgentResponse(
   let executions = Promise.resolve();
   let admissions = Promise.resolve();
   let executionFailure: { error: unknown } | undefined;
+  let runtimeAbort = false;
+  const abortRuntimeFailure = (error: unknown) => {
+    const origin = recordRunFailure(emit, "runtime", error);
+    // Record the first abort owner before synchronous transport listeners run.
+    // A provider control failure relayed by a tool keeps its recorded origin.
+    runtimeAbort ||= !executionSignal.aborted && origin === "runtime";
+    executionAbort.abort(error);
+  };
   const emitToolEvent: AgentEventSink = async (event) => {
     if (event.type === "message_end" && event.message.role === "toolResult") {
       context.messages.push(event.message);
@@ -212,14 +220,12 @@ export async function streamAgentResponse(
         batches.push(batch);
         if (batch.fatal || batch.terminateRun) {
           const reason = batch.fatal?.error ?? new Error("Tool batch terminated");
-          recordRunFailure(emit, "runtime", reason);
-          executionAbort.abort(reason);
+          abortRuntimeFailure(reason);
         }
       })
       .catch((error: unknown) => {
-        recordRunFailure(emit, "runtime", error);
         executionFailure ??= { error };
-        executionAbort.abort(error);
+        abortRuntimeFailure(error);
       })
       .finally(releaseAdmission);
     executions = Promise.all([previousExecutions, execution]).then(() => {});
@@ -367,6 +373,14 @@ export async function streamAgentResponse(
         ensureToolTurnIdentity(
           removeNonExecutableToolCalls({
             ...remainingFragment(result),
+            ...(runtimeAbort && result.stopReason === "aborted"
+              ? {
+                  diagnostics: [
+                    ...(result.diagnostics ?? []),
+                    { type: "synthesized_run_failure", timestamp: result.timestamp },
+                  ],
+                }
+              : {}),
             ...(streamedTurnId ? { turnId: streamedTurnId } : {}),
           }),
         ),

@@ -9,7 +9,12 @@ import type {
 } from "@openclaw/llm-core";
 import { Type } from "typebox";
 import { describe, expect, it, vi } from "vitest";
+import { formatUserFacingAssistantErrorText } from "../../../src/agents/embedded-agent-helpers/error-text.js";
 import { createDeferred } from "../../../test/helpers/promise.js";
+import {
+  failTransportStream,
+  transportAbortError,
+} from "../../ai/src/transports/transport-stream-shared.js";
 import { agentLoop, runAgentLoop } from "./agent-loop.js";
 import { Agent } from "./agent.js";
 import { attachInternalToolBatchLifecycle } from "./internal-hooks.js";
@@ -572,18 +577,19 @@ describe("steering failure ownership", () => {
     },
   );
 
-  it.each(["batch", "listener", "commit", "cleanup-relay"] as const)(
+  it.each(["batch", "listener", "commit", "cleanup-relay", "commit-terminal"] as const)(
     "retains runtime origin through async %s failure and provider abort relay",
     async (boundary) => {
       for (const failure of [
         "opaque async failure",
         Object.freeze(new Error("opaque async failure")),
       ]) {
-        for (const raw of [false, true]) {
+        for (const raw of boundary === "commit-terminal" ? [false] : [false, true]) {
           const closed = vi.fn();
           const cleanupFailure = new Error("intervening runtime cleanup failure");
           let consumedCleanup: unknown;
-          const result = vi.fn(async () => assistant("unused"));
+          const terminal = createAssistantMessageEventStream();
+          const result = vi.fn(() => terminal.result());
           const execute = vi.fn(async () => ({ content: [], details: {} }));
           const commitReadyCalls = vi.fn(() => throwFailure(failure));
           const releaseSkippedCalls = vi.fn();
@@ -619,7 +625,7 @@ describe("steering failure ownership", () => {
               ? {
                   beforeToolBatch: async () => {
                     await setImmediate();
-                    return boundary !== "commit"
+                    return !boundary.startsWith("commit")
                       ? throwFailure(failure)
                       : attachInternalToolBatchLifecycle(
                           {},
@@ -654,7 +660,14 @@ describe("steering failure ownership", () => {
                   } catch (error) {
                     consumedCleanup = error;
                   }
-                  throwFailure(signal.reason);
+                  if (boundary === "commit-terminal") {
+                    const error = transportAbortError(signal);
+                    expect(error).not.toBe(signal.reason);
+                    failTransportStream({ stream: terminal, output: assistant(""), signal, error });
+                    yield* terminal;
+                  } else {
+                    throwFailure(signal.reason);
+                  }
                 } finally {
                   signal.removeEventListener("abort", onAbort);
                   closed();
@@ -681,13 +694,26 @@ describe("steering failure ownership", () => {
             expectFailureOrigin(agent.state.messages, true, failure);
             expect(agent.state.pendingToolCalls.size).toBe(0);
           } else {
-            expectFailureOrigin(await collectLoop(config, streamFn, tools), true, failure);
+            const messages = await collectLoop(config, streamFn, tools);
+            if (boundary === "commit-terminal") {
+              const message = messages.findLast((entry) => entry.role === "assistant");
+              expect(message).toMatchObject({
+                stopReason: "aborted",
+                errorMessage: "Request was aborted",
+                diagnostics: [{ type: "synthesized_run_failure", timestamp: expect.any(Number) }],
+              });
+              expect(message && formatUserFacingAssistantErrorText(message)).toBe(
+                "LLM request failed.",
+              );
+            } else {
+              expectFailureOrigin(messages, true, failure);
+            }
           }
           expect(execute).not.toHaveBeenCalled();
-          expect(result).not.toHaveBeenCalled();
+          expect(result).toHaveBeenCalledTimes(boundary === "commit-terminal" ? 1 : 0);
           expect(closed).toHaveBeenCalledOnce();
           expect(consumedCleanup).toBe(boundary === "cleanup-relay" ? cleanupFailure : undefined);
-          if (boundary === "commit") {
+          if (boundary.startsWith("commit")) {
             expect(commitReadyCalls).toHaveBeenCalledExactlyOnceWith([
               { toolCallId: "lookup", args: {} },
             ]);

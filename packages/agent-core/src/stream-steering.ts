@@ -1,7 +1,7 @@
 import type { Message, StreamOptions, UserMessage } from "@openclaw/llm-core";
 import type { AgentEventSink } from "./agent-stream-response.js";
 import { getInternalSteeringQueueObserver } from "./internal-hooks.js";
-import { recordRunFailure } from "./turn-interruption.js";
+import { rethrowRunFailure } from "./turn-interruption.js";
 import type { AgentLoopConfig } from "./types.js";
 
 /** Forward queued input while its normal transcript owner retains commit ordering. */
@@ -15,8 +15,7 @@ export function createStreamSteering(
     try {
       return callback();
     } catch (error) {
-      recordRunFailure(emit, origin, error);
-      throw error;
+      return rethrowRunFailure(emit, origin, error);
     }
   };
   const observer = getInternalSteeringQueueObserver(config.getSteeringMessages);
@@ -43,10 +42,7 @@ export function createStreamSteering(
     const observedControl: typeof control = {
       steer(messages) {
         return callWithFailureOrigin("provider", () => control.steer(messages)).catch(
-          (error: unknown) => {
-            recordRunFailure(emit, "provider", error);
-            throw error;
-          },
+          (error: unknown) => rethrowRunFailure(emit, "provider", error),
         );
       },
       ...(continuation
@@ -85,8 +81,7 @@ export function createStreamSteering(
           try {
             converted = await convertSteering([...messages]);
           } catch (error) {
-            recordRunFailure(emit, "runtime", error);
-            throw error;
+            rethrowRunFailure(emit, "runtime", error);
           }
           const userMessages = converted.filter(
             (message): message is UserMessage => message.role === "user",

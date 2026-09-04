@@ -129,7 +129,20 @@ export async function runAgentLoop(
   streamFn?: StreamFn,
   runtime?: AgentCoreStreamRuntimeDeps,
 ): Promise<AgentMessage[]> {
-  return runAgentLoopCore(prompts, context, config, emit, signal, streamFn, runtime);
+  const failureContext = createRunFailureContext(emit);
+  try {
+    return await runAgentLoopCore(
+      prompts,
+      context,
+      config,
+      failureContext.emit,
+      signal,
+      streamFn,
+      runtime,
+    );
+  } finally {
+    failureContext.dispose();
+  }
 }
 
 /** Continue an existing loop context and emit only newly produced messages. */
@@ -142,7 +155,7 @@ export async function runAgentLoopContinue(
   runtime?: AgentCoreStreamRuntimeDeps,
 ): Promise<AgentMessage[]> {
   assertContinuableContext(context);
-  return runAgentLoopCore([], context, config, emit, signal, streamFn, runtime);
+  return runAgentLoop([], context, config, emit, signal, streamFn, runtime);
 }
 
 function assertContinuableContext(context: AgentContext): void {
