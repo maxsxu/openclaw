@@ -90,6 +90,7 @@ final class DashboardWindowController: NSWindowController, WKNavigationDelegate,
     private let linkBrowserItem: NSSplitViewItem
     private let splitViewController: NSSplitViewController
     private let updateMessageHandler: DashboardUpdateMessageHandler
+    let deviceSettingsMessageHandler: DashboardDeviceSettingsMessageHandler
     private(set) var currentURL: URL
     var auth: DashboardWindowAuth
     var gatewaySnapshot: DashboardGatewaySnapshot?
@@ -99,7 +100,7 @@ final class DashboardWindowController: NSWindowController, WKNavigationDelegate,
     var onBackgroundSessionOpen: ((DashboardBackgroundSessionCompletion, URL) -> Void)?
     let tlsParams: GatewayTLSParams?
     private let dashboardFrameAutosaveName: String
-    private let updater: UpdaterProviding?
+    let updater: UpdaterProviding?
     private var updateBridgeEnabled: Bool
     private let requestBrowserProfileImportOffer:
         @MainActor (@escaping @MainActor () -> Bool) async -> Bool
@@ -110,7 +111,7 @@ final class DashboardWindowController: NSWindowController, WKNavigationDelegate,
     private var browserProfileImportOfferRequestIsInFlight = false
     private var browserProfileImportOfferRetryPending = false
     private var hasLiveContent = false
-    private var isShowingFailurePage = false
+    private(set) var isShowingFailurePage = false
     private var navigationGeneration: UInt64 = 0
     private var pendingNativeCommands: [DashboardNativeCommand] = []
     private var pendingNativeNavigation: DashboardNativeNavigation?
@@ -153,6 +154,9 @@ final class DashboardWindowController: NSWindowController, WKNavigationDelegate,
         config.userContentController.add(windowDragMessageHandler, name: Self.windowDragMessageHandlerName)
         let notificationsMessageHandler = DashboardNotificationsMessageHandler()
         config.userContentController.add(notificationsMessageHandler, name: Self.notificationsMessageHandlerName)
+        let deviceSettingsMessageHandler = DashboardDeviceSettingsMessageHandler()
+        self.deviceSettingsMessageHandler = deviceSettingsMessageHandler
+        config.userContentController.add(deviceSettingsMessageHandler, name: Self.deviceSettingsMessageHandlerName)
         let gatewaysMessageHandler = DashboardGatewaysMessageHandler()
         config.userContentController.add(gatewaysMessageHandler, name: Self.gatewaysMessageHandlerName)
         let updateMessageHandler = DashboardUpdateMessageHandler()
@@ -228,6 +232,8 @@ final class DashboardWindowController: NSWindowController, WKNavigationDelegate,
         linkMessageHandler.owner = self
         windowDragMessageHandler.owner = self
         notificationsMessageHandler.owner = self
+        deviceSettingsMessageHandler.owner = self
+        deviceSettingsMessageHandler.startObserving()
         gatewaysMessageHandler.owner = self
         updateMessageHandler.owner = self
         self.webView.navigationDelegate = self
@@ -393,6 +399,7 @@ final class DashboardWindowController: NSWindowController, WKNavigationDelegate,
     }
 
     func show() {
+        self.deviceSettingsMessageHandler.startObserving()
         if let window {
             let frame = window.frame
             if frame.width < DashboardWindowLayout.windowMinSize.width ||
@@ -1109,6 +1116,7 @@ extension DashboardWindowController {
     }
 
     func windowWillClose(_: Notification) {
+        self.deviceSettingsMessageHandler.stopObserving()
         self.advanceWindowIntent()
         self.advanceNavigationGeneration()
         self.hasLiveContent = false
@@ -1426,6 +1434,7 @@ extension DashboardWindowController {
         } else if webView === self.webView {
             guard !self.isShowingFailurePage else { return }
             self.hasLiveContent = true
+            self.deviceSettingsMessageHandler.refresh(refreshAvailability: true)
             self.publishNativeHistoryState()
             // Commands admitted after picker selection belong to its successor document.
             guard self.pendingGatewaySwitch == nil else { return }
