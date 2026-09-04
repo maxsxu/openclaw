@@ -12,7 +12,8 @@ import {
 import { resolveSessionStorePathCore, type SessionEntry } from "../../config/sessions.js";
 import { replaceSessionEntrySync } from "../../config/sessions/session-accessor.sqlite-entry.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { isSessionWorkAdmissionTargetActive } from "../../sessions/session-lifecycle-admission.js";
+import { withPluginRuntimeGatewayContextResolver } from "../../plugins/runtime/gateway-request-scope.js";
+import { captureGatewaySessionWorkAdmissions } from "../../sessions/session-lifecycle-admission.js";
 import { closeOpenClawAgentDatabases } from "../../state/openclaw-agent-db.js";
 import { GatewayClientRequestError } from "../client.js";
 import { resolveSessionKeyFromResolveParams } from "../sessions-resolve.js";
@@ -157,6 +158,8 @@ describe("worker family owner resolution", () => {
         sessionKey: "global",
         sessionId: parentId,
       };
+      const resolveGatewayContext = () => undefined;
+      let admissions: ReturnType<typeof captureGatewaySessionWorkAdmissions> | undefined;
       const dispatched: unknown[] = [];
       const callGateway: AgentToolGatewayRequestCaller = async <T>(
         request: Parameters<AgentToolGatewayRequestCaller>[0],
@@ -178,23 +181,26 @@ describe("worker family owner resolution", () => {
         if (request.method !== "agent") {
           throw new Error(`Unexpected Gateway method: ${request.method}`);
         }
-        expect(isSessionWorkAdmissionTargetActive(scope)).toBe(true);
+        admissions = captureGatewaySessionWorkAdmissions(resolveGatewayContext);
+        expect(admissions.isActive(scope)).toBe(true);
         dispatched.push(request.params);
         return { runId: "admitted-parent-run", status: "accepted" } as T;
       };
-      const result = await executeWorkerSessionSend({
-        source,
-        target,
-        request: {
-          toolCallId: "owner-send",
-          sessionKey: "global",
-          message: "Report to this parent",
-          timeoutSeconds: 0,
-        },
-        idempotencyKey: "owner-send",
-        assertSource: () => {},
-        callGateway,
-      });
+      const result = await withPluginRuntimeGatewayContextResolver(resolveGatewayContext, () =>
+        executeWorkerSessionSend({
+          source,
+          target,
+          request: {
+            toolCallId: "owner-send",
+            sessionKey: "global",
+            message: "Report to this parent",
+            timeoutSeconds: 0,
+          },
+          idempotencyKey: "owner-send",
+          assertSource: () => {},
+          callGateway,
+        }),
+      );
       expect(result.details).toMatchObject({ status: "accepted" });
       expect(dispatched).toEqual([
         expect.objectContaining({
@@ -203,7 +209,7 @@ describe("worker family owner resolution", () => {
           message: expect.stringContaining("Report to this parent"),
         }),
       ]);
-      expect(isSessionWorkAdmissionTargetActive(scope)).toBe(false);
+      expect(admissions?.isActive(scope)).toBe(false);
     },
   );
 
