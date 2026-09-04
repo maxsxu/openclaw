@@ -9,6 +9,7 @@ import {
   resetFacadeLoaderStateForTest,
 } from "../plugin-sdk/facade-loader.js";
 import {
+  loadActivatedBundledPluginPublicSurfaceModule,
   loadActivatedBundledPluginPublicSurfaceModuleSync,
   testing as facadeRuntimeTesting,
 } from "../plugin-sdk/facade-runtime.js";
@@ -271,9 +272,14 @@ describe("managed plugin public surfaces", () => {
     }
   });
 
-  it.each(["ts", "js"] as const)(
-    "keeps %s bundled inspection libraries usable while fencing activated runtime exports",
-    async (extension) => {
+  it.each([
+    ["ts", "sync", loadActivatedBundledPluginPublicSurfaceModuleSync],
+    ["ts", "async", loadActivatedBundledPluginPublicSurfaceModule],
+    ["js", "sync", loadActivatedBundledPluginPublicSurfaceModuleSync],
+    ["js", "async", loadActivatedBundledPluginPublicSurfaceModule],
+  ] as const)(
+    "keeps %s bundled inspection libraries usable while fencing %s activated runtime exports",
+    async (extension, _mode, loadActivated) => {
       const directory = fs.realpathSync(temp.make("openclaw-public-bundled-"));
       const pluginId = "bundled-surface-fixture";
       const root = path.join(directory, pluginId);
@@ -290,7 +296,8 @@ describe("managed plugin public surfaces", () => {
       );
       const request = { dirName: pluginId, artifactBasename: "api.js" };
       const library = loadBundledPluginPublicSurfaceModuleSyncCore<PublicApi>(request);
-      const runtime = loadActivatedBundledPluginPublicSurfaceModuleSync<PublicApi>(request);
+      const runtime = await loadActivated<PublicApi>(request);
+      const retainedRead = runtime.read;
       expect(library.read()).toBe("registered");
       expect(runtime.read()).toBe("registered");
       const disabled = createEmptyPluginRegistry();
@@ -309,10 +316,9 @@ describe("managed plugin public surfaces", () => {
         expect(inspection.read()).toBe("library");
         expect(() => library.read()).toThrow(/reloaded|disabled|retiring/);
       }
+      expect(retainedRead).toThrow(/reloaded|disabled|retiring/);
       expect(() => runtime.read()).toThrow(/reloaded or disabled/);
-      expect(() => loadActivatedBundledPluginPublicSurfaceModuleSync(request)).toThrow(
-        /access blocked/,
-      );
+      await expect(async () => await loadActivated(request)).rejects.toThrow(/access blocked/);
     },
   );
 });

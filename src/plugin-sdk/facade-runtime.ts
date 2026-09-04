@@ -242,13 +242,8 @@ export function loadActivatedBundledPluginPublicSurfaceModuleSync<T extends obje
 export async function loadActivatedBundledPluginPublicSurfaceModule<T extends object>(
   params: BundledPluginPublicSurfaceParams,
 ): Promise<T> {
-  const runtime = await loadFacadeActivationCheckRuntimeAsync().catch(
-    throwFacadeActivationCheckRuntimeUnavailable,
-  );
-  runtime.resolveActivatedBundledPluginPublicSurfaceAccessOrThrow(
-    buildFacadeActivationCheckParams(params),
-  );
-  return loadBundledPluginPublicSurfaceModuleSync<T>(params);
+  await loadFacadeActivationCheckRuntimeAsync().catch(throwFacadeActivationCheckRuntimeUnavailable);
+  return loadActivatedBundledPluginPublicSurfaceModuleSync<T>(params);
 }
 
 /** Load an activated plugin public surface, returning null when activation policy blocks access. */
@@ -273,14 +268,8 @@ export async function tryLoadActivatedBundledPluginPublicSurfaceModule<T extends
   artifactBasename: string;
   env?: NodeJS.ProcessEnv;
 }): Promise<T | null> {
-  const runtime = await loadFacadeActivationCheckRuntimeAsync();
-  const access = runtime.resolveBundledPluginPublicSurfaceAccess(
-    buildFacadeActivationCheckParams(params),
-  );
-  if (!access.allowed) {
-    return null;
-  }
-  return wrapActivatedSurface(access.pluginId, loadBundledPluginPublicSurfaceModuleSync<T>(params));
+  await loadFacadeActivationCheckRuntimeAsync();
+  return tryLoadActivatedBundledPluginPublicSurfaceModuleSync<T>(params);
 }
 
 /** Reset facade runtime caches and activation-check test overrides. */
