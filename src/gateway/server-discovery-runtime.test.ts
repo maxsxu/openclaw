@@ -1,6 +1,7 @@
 // Gateway discovery runtime tests cover plugin discovery advertisements,
 // wide-area DNS records, Bonjour naming, and shutdown cleanup.
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PluginInstance } from "../plugins/plugin-instance.js";
 import type { PluginGatewayDiscoveryServiceRegistration } from "../plugins/registry-types.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import { captureFullEnv } from "../test-utils/env.js";
@@ -184,6 +185,33 @@ describe("startGatewayDiscovery", () => {
 
     await result.stop();
     expect(stopped).toEqual(["peer", "bonjour"]);
+  });
+
+  it("continues discovery after a plugin instance refuses advertisement admission", async () => {
+    useDevelopmentDiscoveryEnv();
+    const instance = new PluginInstance("retired-discovery");
+    const refused = makeDiscoveryService({ id: "retired-discovery" });
+    const peerStop = vi.fn();
+    const peer = makeDiscoveryService({ id: "peer", stop: peerStop });
+    const logs = makeLogs();
+    const owned = { ...refused, service: instance.wrap(refused.service) };
+    instance.quiesce();
+    let discovery: Awaited<ReturnType<typeof startGatewayDiscovery>> | undefined;
+    try {
+      discovery = await startDiscovery({
+        gatewayDiscoveryServices: [owned, peer],
+        logDiscovery: logs,
+      });
+      expect(refused.service.advertise).not.toHaveBeenCalled();
+      expect(peer.service.advertise).toHaveBeenCalledOnce();
+      expect(logs.warn).toHaveBeenCalledExactlyOnceWith(
+        expect.stringContaining("gateway discovery service failed (retired-discovery"),
+      );
+    } finally {
+      await discovery?.stop();
+      await instance.dispose();
+    }
+    expect(peerStop).toHaveBeenCalledOnce();
   });
 
   it("omits invalid SSH discovery ports", async () => {

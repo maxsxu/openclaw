@@ -597,7 +597,7 @@ back to OpenClaw.
 | Discovery visibility    | `discovery.mdns.mode`                                                                                                                                                        | No (replaces discovery advertisements) |
 | Browser defaults        | `browser.profiles`, `browser.defaultProfile`, `browser.headless`, `browser.executablePath`, `browser.attachOnly`, `browser.cdpUrl`, `browser.noSandbox`, `browser.extraArgs` | No                                     |
 | Gateway server          | Other `gateway.*` settings (port, bind, auth mode, roles, tailscale, TLS)                                                                                                    | **Yes**                                |
-| Infrastructure          | Other `discovery` and `browser` settings                                                                                                 | **Yes**                                |
+| Infrastructure          | Other `discovery` and `browser` settings                                                                                                                                     | **Yes**                                |
 
 Changes to `channels.defaults` and `channels.modelByChannel` restart loaded
 channel runtimes to refresh their shared policy. Manually stopped accounts stay

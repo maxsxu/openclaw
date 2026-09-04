@@ -39,15 +39,12 @@ import { resolveGatewayStartupPluginActivationConfig } from "./plugin-activation
 import { prepareClientPluginNodeCapabilities } from "./plugin-node-capability.js";
 import type { prepareGatewayLifecycle } from "./server-lifecycle.js";
 import type { prepareGatewayPluginLoad } from "./server-plugin-bootstrap.js";
-import type { GatewayPluginRuntimeClaim } from "./server-plugin-runtime-generation.js";
 import {
   GatewayConfigReloadSupersededError,
   type GatewayReloadHandlerParams,
 } from "./server-reload-contracts.js";
 import type { GatewayPostReadySidecarHandle } from "./server-startup-post-attach.js";
 import { listPluginNodeCapabilities } from "./server/plugins-http/route-capability.js";
-
-type LoadedGatewayPlugins = ReturnType<typeof prepareGatewayPluginLoad>;
 
 export async function reloadGatewayPlugins(
   {
@@ -56,20 +53,15 @@ export async function reloadGatewayPlugins(
     log,
     loadGatewayPluginBootstrapModule,
     prepareAttachedPluginRuntime,
-    refreshAttachedGatewayDiscovery,
   }: {
     runtime: Awaited<ReturnType<typeof prepareGatewayLifecycle>>;
     port: number;
     log: ReturnType<typeof createSubsystemLogger>;
     loadGatewayPluginBootstrapModule: () => Promise<typeof import("./server-plugin-bootstrap.js")>;
-    prepareAttachedPluginRuntime: (loaded: LoadedGatewayPlugins) => Promise<{
+    prepareAttachedPluginRuntime: (loaded: ReturnType<typeof prepareGatewayPluginLoad>) => Promise<{
       publish: () => void;
       afterCommit: () => void;
     }>;
-    refreshAttachedGatewayDiscovery: (
-      registry: LoadedGatewayPlugins["pluginRegistry"],
-      claim: GatewayPluginRuntimeClaim,
-    ) => Promise<void>;
   },
   params: Parameters<GatewayReloadHandlerParams["reloadPlugins"]>[0],
 ): ReturnType<GatewayReloadHandlerParams["reloadPlugins"]> {
@@ -272,10 +264,11 @@ export async function reloadGatewayPlugins(
         : [],
     );
     try {
-      // Consumers must release subscriptions while the producing instance is callable.
+      // Consumers must release their handles while the producing instance is callable.
       for (const sidecar of sidecarReplacements) {
         await sidecar.drain();
       }
+      await runtimeState.discovery?.update({ gatewayDiscoveryServices: [] });
     } catch (error) {
       cleanupFailed = true;
       throw error;
@@ -362,6 +355,10 @@ export async function reloadGatewayPlugins(
         for (const sidecar of sidecarReplacements) {
           sidecar.resume(params.nextConfig);
         }
+        await runtimeState.discovery?.update(
+          { gatewayDiscoveryServices: nextRegistry.gatewayDiscoveryServices },
+          replacement.claim,
+        );
       }
     }
     await runLifecycleHooks(nextRegistry, true, params.nextConfig);
@@ -403,7 +400,6 @@ export async function reloadGatewayPlugins(
         }
       }
     }
-    await refreshAttachedGatewayDiscovery(nextRegistry, replacement.claim);
     phase = "dispose";
     await waitForPluginRegistryRetirement(previousRegistry);
     await retirePluginCache(previousCache);
@@ -494,6 +490,10 @@ export async function reloadGatewayPlugins(
           for (const sidecar of sidecarReplacements) {
             sidecar.resume(previousConfig);
           }
+          await runtimeState.discovery?.update(
+            { gatewayDiscoveryServices: previousRegistry.gatewayDiscoveryServices },
+            kernel.pluginRuntimeGeneration.currentClaim(),
+          );
           await runLifecycleHooks(previousRegistry, true, previousConfig);
           for (const [channel, accounts] of stoppedChannels) {
             for (const account of accounts) {
