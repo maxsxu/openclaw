@@ -5,6 +5,7 @@ import { activeSessions } from "../agents/tools/transcripts-tool-runtime.js";
 import { createTranscriptsTool } from "../agents/tools/transcripts-tool.js";
 import { clearRuntimeConfigSnapshot, setRuntimeConfigSnapshot } from "../config/io.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { racePromiseWithAbortSignal } from "../infra/abort-signal.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { activatePluginRegistry } from "../plugins/loader-shared.js";
 import { getPluginInstance } from "../plugins/plugin-instance-scope.js";
@@ -394,6 +395,7 @@ it.each(["commit", "rollback", "after-commit error", "late startup"] as const)(
 function registerTranscriptFixture(api: OpenClawPluginApi, owner: "first" | "sibling") {
   const watches: TranscriptOccupancyWatchRequest[] = [];
   const captures: TranscriptStartRequest[] = [];
+  let nextCapture = createDeferredCore();
   const unwatch = vi.fn();
   const stop = vi.fn<NonNullable<TranscriptSourceProvider["stop"]>>(async ({ sessionId }) => ({
     ok: true,
@@ -411,14 +413,26 @@ function registerTranscriptFixture(api: OpenClawPluginApi, owner: "first" | "sib
     },
     start: async (request) => {
       captures.push(request);
+      nextCapture.resolve();
+      nextCapture = createDeferredCore();
       return { ok: true, session: request.session };
     },
     stop,
   });
-  return { watches, captures, unwatch, stop };
+  return {
+    watches,
+    captures,
+    unwatch,
+    stop,
+    async waitForCapture(count: number, signal: AbortSignal) {
+      while (captures.length < count) {
+        await racePromiseWithAbortSignal(nextCapture.promise, signal);
+      }
+    },
+  };
 }
 
-it.each([
+it.for([
   "commit",
   "rollback",
   "after-commit error",
@@ -428,7 +442,7 @@ it.each([
   "manual stop",
 ] as const)(
   "keeps startup transcript capture owned across plugin replacement: %s",
-  async (outcome) => {
+  async (outcome, { signal }) => {
     const stateDir = makeTrackedTempDir("gateway-transcript-replacement-", tempDirs);
     await withEnvAsync({ OPENCLAW_STATE_DIR: stateDir }, async () => {
       const entry = (owner: string, channelId = "original-room") => ({
@@ -474,6 +488,8 @@ it.each([
         provider: ReturnType<typeof registerTranscriptFixture>,
         count: number,
       ) => {
+        // Gateway readiness precedes deferred capture startup and its session write.
+        await provider.waitForCapture(count, signal);
         await vi.waitFor(() => {
           expect(provider.captures).toHaveLength(count);
           expect(activeSessions.get(provider.captures[count - 1]!.session.sessionId)?.phase).toBe(
@@ -579,10 +595,9 @@ it.each([
               details: { sessionId: oldCapture.session.sessionId },
             });
           }
-          await vi.waitFor(() =>
-            expect(activeSessions.get(oldCapture.session.sessionId)).not.toBe(oldOwner),
-          );
+          // The next reload joins cleanup retained beyond the first drain deadline.
           result = await fixture.reload(acceptedConfig);
+          expect(activeSessions.get(oldCapture.session.sessionId)).not.toBe(oldOwner);
         } else {
           result = await fixture.reload(acceptedConfig).catch((error: unknown) => error);
         }
