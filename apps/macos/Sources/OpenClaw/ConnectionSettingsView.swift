@@ -15,7 +15,6 @@ struct ConnectionSettingsView: View {
     @State private var gatewayDiscovery = GatewayDiscoveryModel(
         localDisplayName: InstanceIdentity.displayName)
     @State private var remoteStatus: RemoteStatus = .idle
-    @State private var showRemoteAdvanced = false
     private let isPreview = ProcessInfo.processInfo.isPreview
     private var isNixMode: Bool {
         ProcessInfo.processInfo.isNixMode
@@ -337,7 +336,7 @@ struct ConnectionSettingsView: View {
 
     private var remoteAdvancedGroup: some View {
         SettingsCardGroup("Advanced") {
-            DisclosureGroup(isExpanded: self.$showRemoteAdvanced) {
+            DisclosureGroup {
                 VStack(alignment: .leading, spacing: 12) {
                     self.advancedTextField(
                         "Identity file",
