@@ -66,6 +66,19 @@ struct ConnectionSettingsView: View {
             case .remote:
                 self.remoteCard
             }
+
+            HStack(spacing: 12) {
+                Text("""
+                App-local settings (permissions, Quick Chat, voice, updates) live in \
+                Dashboard → Settings → This Mac and require a Gateway release that includes those pages.
+                """)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                Button("Open Dashboard Settings") { AppNavigationActions.openSettings() }
+                    .controlSize(.small)
+                    .fixedSize()
+            }
         }
     }
 
