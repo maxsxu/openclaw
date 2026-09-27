@@ -529,7 +529,11 @@ describe("runServiceRestart token drift", () => {
   });
 
   it("warns when managed service environment has drifted on restart", async () => {
-    loadConfig.mockReturnValue({});
+    loadConfig.mockReturnValue({
+      env: {
+        TAVILY_API_KEY: "tvly-new-value",
+      },
+    });
     service.readCommand.mockResolvedValue({
       programArguments: [],
       environment: {

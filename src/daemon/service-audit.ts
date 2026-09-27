@@ -385,34 +385,15 @@ export function checkManagedServiceEnvDrift(params: {
     return null;
   }
   const managedKeys = readManagedServiceEnvKeysFromEnvironment(params.serviceEnvironment);
-  const hasManagedMarker = Object.keys(params.serviceEnvironment).some(
-    (key) => normalizeServiceEnvKey(key) === "OPENCLAW_SERVICE_MANAGED_ENV_KEYS",
-  );
-  if (!hasManagedMarker) {
+  if (managedKeys.size === 0) {
     return null;
-  }
-  // Compare the union of installed managed keys and current durable keys so that
-  // newly added credentials, modified keys, and removed keys are all detected.
-  const candidateKeys = new Map<string, string>();
-  for (const rawKey of managedKeys) {
-    const normalized = normalizeServiceEnvKey(rawKey);
-    if (normalized) {
-      candidateKeys.set(normalized, rawKey);
-    }
-  }
-  for (const rawKey of Object.keys(params.durableEnvironment)) {
-    const normalized = normalizeServiceEnvKey(rawKey);
-    if (normalized && !candidateKeys.has(normalized)) {
-      candidateKeys.set(normalized, rawKey);
-    }
   }
 
-  if (candidateKeys.size === 0) {
-    return null;
-  }
   const driftedKeys: string[] = [];
-  for (const [normalizedKey, displayKey] of candidateKeys) {
+  for (const rawKey of managedKeys) {
+    const normalizedKey = normalizeServiceEnvKey(rawKey);
     if (
+      !normalizedKey ||
       normalizedKey === "OPENCLAW_GATEWAY_TOKEN" ||
       normalizedKey === "OPENCLAW_SERVICE_VERSION" ||
       normalizedKey === "OPENCLAW_SERVICE_MANAGED_ENV_KEYS"
@@ -433,10 +414,15 @@ export function checkManagedServiceEnvDrift(params: {
         break;
       }
     }
-    const serviceTrimmed = serviceValue?.trim() ?? "";
-    const durableTrimmed = durableValue?.trim() ?? "";
-    if (serviceTrimmed !== durableTrimmed) {
-      driftedKeys.push(displayKey);
+    // Only warn when the installed service defines a value that shadows a durable value
+    // (stale installed value). If serviceValue is undefined, Gateway startup loads it normally.
+    // If durableValue is undefined, the key may be a non-durable SecretRef captured during install.
+    if (
+      serviceValue !== undefined &&
+      durableValue !== undefined &&
+      serviceValue.trim() !== durableValue.trim()
+    ) {
+      driftedKeys.push(rawKey);
     }
   }
   if (driftedKeys.length === 0) {
