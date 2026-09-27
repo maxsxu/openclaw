@@ -370,6 +370,7 @@ export function checkTokenDrift(params: {
 export function checkManagedServiceEnvDrift(params: {
   serviceEnvironment: Record<string, string | undefined> | undefined;
   durableEnvironment: Record<string, string | undefined> | undefined;
+  secretRefKeys?: Iterable<string>;
   platform?: NodeJS.Platform;
 }): ServiceConfigIssue | null {
   if (!params.serviceEnvironment || !params.durableEnvironment) {
@@ -387,6 +388,16 @@ export function checkManagedServiceEnvDrift(params: {
   const managedKeys = readManagedServiceEnvKeysFromEnvironment(params.serviceEnvironment);
   if (managedKeys.size === 0) {
     return null;
+  }
+
+  const secretRefKeySet = new Set<string>();
+  if (params.secretRefKeys) {
+    for (const key of params.secretRefKeys) {
+      const normalized = normalizeServiceEnvKey(key);
+      if (normalized) {
+        secretRefKeySet.add(normalized);
+      }
+    }
   }
 
   const driftedKeys: string[] = [];
@@ -414,14 +425,23 @@ export function checkManagedServiceEnvDrift(params: {
         break;
       }
     }
-    // Only warn when the installed service defines a value that shadows a durable value
-    // (stale installed value). If serviceValue is undefined, Gateway startup loads it normally.
-    // If durableValue is undefined, the key may be a non-durable SecretRef captured during install.
-    if (
-      serviceValue !== undefined &&
-      durableValue !== undefined &&
-      serviceValue.trim() !== durableValue.trim()
-    ) {
+
+    // Skip if service doesn't define it: startup loads it normally via dotenv
+    if (serviceValue === undefined) {
+      continue;
+    }
+
+    // If absent from durable sources:
+    // It is a removed managed key unless it is an active non-durable SecretRef key.
+    if (durableValue === undefined) {
+      if (!secretRefKeySet.has(normalizedKey)) {
+        driftedKeys.push(rawKey);
+      }
+      continue;
+    }
+
+    // If both exist, compare values:
+    if (serviceValue.trim() !== durableValue.trim()) {
       driftedKeys.push(rawKey);
     }
   }

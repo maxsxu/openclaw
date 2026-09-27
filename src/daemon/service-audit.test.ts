@@ -936,6 +936,25 @@ describe("checkManagedServiceEnvDrift", () => {
     expect(result).toBeNull();
   });
 
+  it("detects drift when managed durable key is removed from durable environment", () => {
+    const result = checkManagedServiceEnvDrift({
+      serviceEnvironment: {
+        OPENCLAW_SERVICE_MANAGED_ENV_KEYS: "TAVILY_API_KEY",
+        TAVILY_API_KEY: "tvly-old",
+      },
+      durableEnvironment: {},
+      platform: "darwin",
+    });
+    expect(result).toStrictEqual({
+      code: SERVICE_AUDIT_CODES.gatewayEnvDrift,
+      message:
+        "Durable service environment differs from service definition for managed keys (TAVILY_API_KEY). The daemon will use the old environment after restart.",
+      detail: "drifted keys: TAVILY_API_KEY",
+      environmentKeys: ["TAVILY_API_KEY"],
+      level: "recommended",
+    });
+  });
+
   it("skips non-durable SecretRef keys captured during install absent from durable sources", () => {
     const result = checkManagedServiceEnvDrift({
       serviceEnvironment: {
@@ -946,6 +965,7 @@ describe("checkManagedServiceEnvDrift", () => {
       durableEnvironment: {
         TAVILY_API_KEY: "tvly-same",
       },
+      secretRefKeys: ["SECRETREF_ENV_ID"],
       platform: "darwin",
     });
     expect(result).toBeNull();
