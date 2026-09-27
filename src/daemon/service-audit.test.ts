@@ -911,7 +911,7 @@ describe("checkManagedServiceEnvDrift", () => {
     expect(result).toStrictEqual({
       code: SERVICE_AUDIT_CODES.gatewayEnvDrift,
       message:
-        "State-dir .env differs from service environment for managed keys (TAVILY_API_KEY). The daemon will use the old environment after restart.",
+        "Durable service environment differs from service definition for managed keys (TAVILY_API_KEY). The daemon will use the old environment after restart.",
       detail: "drifted keys: TAVILY_API_KEY",
       environmentKeys: ["TAVILY_API_KEY"],
       level: "recommended",
@@ -919,6 +919,29 @@ describe("checkManagedServiceEnvDrift", () => {
     // Secrets must NOT be exposed anywhere in the returned issue
     expect(JSON.stringify(result)).not.toContain("tvly-old-secret");
     expect(JSON.stringify(result)).not.toContain("tvly-new-secret");
+  });
+
+  it("detects drift when a new durable key is added after service installation", () => {
+    const result = checkManagedServiceEnvDrift({
+      serviceEnvironment: {
+        OPENCLAW_SERVICE_MANAGED_ENV_KEYS: "TAVILY_API_KEY",
+        TAVILY_API_KEY: "tvly-same",
+      },
+      durableEnvironment: {
+        TAVILY_API_KEY: "tvly-same",
+        ANTHROPIC_API_KEY: "sk-ant-new",
+      },
+      platform: "darwin",
+    });
+    expect(result).toStrictEqual({
+      code: SERVICE_AUDIT_CODES.gatewayEnvDrift,
+      message:
+        "Durable service environment differs from service definition for managed keys (ANTHROPIC_API_KEY). The daemon will use the old environment after restart.",
+      detail: "drifted keys: ANTHROPIC_API_KEY",
+      environmentKeys: ["ANTHROPIC_API_KEY"],
+      level: "recommended",
+    });
+    expect(JSON.stringify(result)).not.toContain("sk-ant-new");
   });
 
   it("detects drift when managed key is removed from durable environment", () => {

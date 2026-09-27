@@ -611,13 +611,15 @@ export async function runServiceRestart(params: {
           defaultRuntime.log(`\n⚠️  ${warning}\n`);
         }
       }
-      const { readStateDirDotEnvFromStateDir } = await import("../../config/state-dir-dotenv.js");
-      const { resolveStateDir } = await import("../../config/paths.js");
-      const stateDir = resolveStateDir(driftEnv);
-      const stateDirDotEnv = readStateDirDotEnvFromStateDir(stateDir).entries;
+      const { collectDurableServiceEnvVarSources } =
+        await import("../../config/state-dir-dotenv.js");
+      const { durableEnvironment } = collectDurableServiceEnvVarSources({
+        env: driftEnv,
+        config: cfg,
+      });
       const envDriftIssue = checkManagedServiceEnvDrift({
         serviceEnvironment: command?.environment,
-        durableEnvironment: stateDirDotEnv,
+        durableEnvironment,
       });
       if (envDriftIssue) {
         const recovery =

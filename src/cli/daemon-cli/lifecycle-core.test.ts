@@ -543,12 +543,34 @@ describe("runServiceRestart token drift", () => {
     const payload = readJsonLog<{ warnings?: string[] }>();
     expect(
       payload.warnings?.some((warning) =>
-        warning.includes("State-dir .env differs from service environment for managed keys (TAVILY_API_KEY)"),
+        warning.includes(
+          "Durable service environment differs from service definition for managed keys (TAVILY_API_KEY)",
+        ),
       ),
     ).toBe(true);
-    expect(
-      payload.warnings?.some((warning) => warning.includes("gateway install --force")),
-    ).toBe(true);
+    expect(payload.warnings?.some((warning) => warning.includes("gateway install --force"))).toBe(
+      true,
+    );
+  });
+
+  it("includes config env values in durable environment during restart drift checks", async () => {
+    loadConfig.mockReturnValue({
+      env: {
+        CONFIG_MANAGED_KEY: "config-value",
+      },
+    });
+    service.readCommand.mockResolvedValue({
+      programArguments: [],
+      environment: {
+        OPENCLAW_SERVICE_MANAGED_ENV_KEYS: "CONFIG_MANAGED_KEY",
+        CONFIG_MANAGED_KEY: "config-value",
+      },
+    });
+
+    await runServiceRestart(createServiceRunArgs(true));
+
+    const payload = readJsonLog<{ warnings?: string[] }>();
+    expect(payload.warnings).toBeUndefined();
   });
 
   it("prefers service command env over process env for SecretRef token drift resolution", async () => {

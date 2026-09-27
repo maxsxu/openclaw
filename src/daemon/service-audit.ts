@@ -385,29 +385,50 @@ export function checkManagedServiceEnvDrift(params: {
     return null;
   }
   const managedKeys = readManagedServiceEnvKeysFromEnvironment(params.serviceEnvironment);
-  if (managedKeys.size === 0) {
+  const hasManagedMarker = Object.keys(params.serviceEnvironment).some(
+    (key) => normalizeServiceEnvKey(key) === "OPENCLAW_SERVICE_MANAGED_ENV_KEYS",
+  );
+  if (!hasManagedMarker) {
+    return null;
+  }
+  // Compare the union of installed managed keys and current durable keys so that
+  // newly added credentials, modified keys, and removed keys are all detected.
+  const candidateKeys = new Map<string, string>();
+  for (const rawKey of managedKeys) {
+    const normalized = normalizeServiceEnvKey(rawKey);
+    if (normalized) {
+      candidateKeys.set(normalized, rawKey);
+    }
+  }
+  for (const rawKey of Object.keys(params.durableEnvironment)) {
+    const normalized = normalizeServiceEnvKey(rawKey);
+    if (normalized && !candidateKeys.has(normalized)) {
+      candidateKeys.set(normalized, rawKey);
+    }
+  }
+
+  if (candidateKeys.size === 0) {
     return null;
   }
   const driftedKeys: string[] = [];
-  for (const rawManagedKey of managedKeys) {
-    const normalizedManaged = normalizeServiceEnvKey(rawManagedKey);
+  for (const [normalizedKey, displayKey] of candidateKeys) {
     if (
-      !normalizedManaged ||
-      normalizedManaged === "OPENCLAW_GATEWAY_TOKEN" ||
-      normalizedManaged === "OPENCLAW_SERVICE_VERSION"
+      normalizedKey === "OPENCLAW_GATEWAY_TOKEN" ||
+      normalizedKey === "OPENCLAW_SERVICE_VERSION" ||
+      normalizedKey === "OPENCLAW_SERVICE_MANAGED_ENV_KEYS"
     ) {
       continue;
     }
     let serviceValue: string | undefined;
     for (const [key, value] of Object.entries(params.serviceEnvironment)) {
-      if (normalizeServiceEnvKey(key) === normalizedManaged) {
+      if (normalizeServiceEnvKey(key) === normalizedKey) {
         serviceValue = value;
         break;
       }
     }
     let durableValue: string | undefined;
     for (const [key, value] of Object.entries(params.durableEnvironment)) {
-      if (normalizeServiceEnvKey(key) === normalizedManaged) {
+      if (normalizeServiceEnvKey(key) === normalizedKey) {
         durableValue = value;
         break;
       }
@@ -415,7 +436,7 @@ export function checkManagedServiceEnvDrift(params: {
     const serviceTrimmed = serviceValue?.trim() ?? "";
     const durableTrimmed = durableValue?.trim() ?? "";
     if (serviceTrimmed !== durableTrimmed) {
-      driftedKeys.push(rawManagedKey);
+      driftedKeys.push(displayKey);
     }
   }
   if (driftedKeys.length === 0) {
@@ -424,7 +445,7 @@ export function checkManagedServiceEnvDrift(params: {
   driftedKeys.sort();
   return {
     code: SERVICE_AUDIT_CODES.gatewayEnvDrift,
-    message: `State-dir .env differs from service environment for managed keys (${driftedKeys.join(", ")}). The daemon will use the old environment after restart.`,
+    message: `Durable service environment differs from service definition for managed keys (${driftedKeys.join(", ")}). The daemon will use the old environment after restart.`,
     detail: `drifted keys: ${driftedKeys.join(", ")}`,
     environmentKeys: driftedKeys,
     level: "recommended",
