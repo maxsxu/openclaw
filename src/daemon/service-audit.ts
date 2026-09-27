@@ -440,8 +440,8 @@ export function checkManagedServiceEnvDrift(params: {
       continue;
     }
 
-    // If both exist, compare values:
-    if (serviceValue.trim() !== durableValue.trim()) {
+    // If both exist, compare exact values:
+    if (serviceValue !== durableValue) {
       driftedKeys.push(rawKey);
     }
   }

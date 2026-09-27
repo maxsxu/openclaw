@@ -921,6 +921,27 @@ describe("checkManagedServiceEnvDrift", () => {
     expect(JSON.stringify(result)).not.toContain("tvly-new-secret");
   });
 
+  it("detects drift when value differs only by leading or trailing whitespace", () => {
+    const result = checkManagedServiceEnvDrift({
+      serviceEnvironment: {
+        OPENCLAW_SERVICE_MANAGED_ENV_KEYS: "TAVILY_API_KEY",
+        TAVILY_API_KEY: "tvly-secret ",
+      },
+      durableEnvironment: {
+        TAVILY_API_KEY: "tvly-secret",
+      },
+      platform: "darwin",
+    });
+    expect(result).toStrictEqual({
+      code: SERVICE_AUDIT_CODES.gatewayEnvDrift,
+      message:
+        "Durable service environment differs from service definition for managed keys (TAVILY_API_KEY). The daemon will use the old environment after restart.",
+      detail: "drifted keys: TAVILY_API_KEY",
+      environmentKeys: ["TAVILY_API_KEY"],
+      level: "recommended",
+    });
+  });
+
   it("skips added keys absent from service definition that startup will load normally", () => {
     const result = checkManagedServiceEnvDrift({
       serviceEnvironment: {

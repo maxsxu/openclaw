@@ -75,7 +75,7 @@ describe("runServiceRestart managed service env drift", () => {
 
     await runServiceRestart(createServiceRunArgs(true));
 
-    const payload = readJsonLog<{ warnings?: string[] }>();
+    const payload = readJsonLog();
     expect(
       payload.warnings?.some((warning) =>
         warning.includes(
@@ -100,7 +100,7 @@ describe("runServiceRestart managed service env drift", () => {
 
     await runServiceRestart(createServiceRunArgs(true));
 
-    const payload = readJsonLog<{ warnings?: string[] }>();
+    const payload = readJsonLog();
     expect(
       payload.warnings?.some((warning) =>
         warning.includes(
@@ -129,7 +129,7 @@ describe("runServiceRestart managed service env drift", () => {
 
     await runServiceRestart(createServiceRunArgs(true));
 
-    const payload = readJsonLog<{ warnings?: string[] }>();
+    const payload = readJsonLog();
     expect(payload.warnings).toBeUndefined();
   });
 
@@ -160,7 +160,7 @@ describe("runServiceRestart managed service env drift", () => {
 
     await runServiceRestart(createServiceRunArgs(true));
 
-    const payload = readJsonLog<{ warnings?: string[] }>();
+    const payload = readJsonLog();
     expect(
       payload.warnings?.some((warning) =>
         warning.includes("gateway.auth.token SecretRef is configured but unavailable"),
