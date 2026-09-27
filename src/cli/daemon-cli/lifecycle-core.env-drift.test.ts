@@ -54,9 +54,9 @@ describe("runServiceRestart managed service env drift", () => {
     });
   });
 
-  function readJsonLog<T extends object>() {
+  function readJsonLog(): { warnings?: string[] } {
     const jsonLine = lifecycleRuntimeLogs.find((line) => line.trim().startsWith("{"));
-    return JSON.parse(jsonLine ?? "{}") as T;
+    return JSON.parse(jsonLine ?? "{}") as { warnings?: string[] };
   }
 
   it("warns when managed service environment has changed value on restart", async () => {
