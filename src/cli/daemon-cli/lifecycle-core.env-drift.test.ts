@@ -20,17 +20,23 @@ const loadConfig = vi.fn<() => OpenClawConfig>(() => ({
   },
 }));
 
-vi.mock("../../config/config.js", () => ({
+// mock-isolation: isolate test config loader and avoid reading host config files
+vi.mock("../../config/config.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../config/config.js")>()),
   getRuntimeConfig: () => loadConfig(),
   loadConfig: () => loadConfig(),
   readBestEffortConfig: async () => loadConfig(),
 }));
 
-vi.mock("../../runtime.js", () => ({
+// mock-isolation: isolate test lifecycle runtime without mutating real gateway process state
+vi.mock("../../runtime.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../runtime.js")>()),
   defaultRuntime: lifecycleTestRuntime,
 }));
 
-vi.mock("../../infra/restart-intent.js", () => ({
+// mock-isolation: stub restart intent file operations without touching disk
+vi.mock("../../infra/restart-intent.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../infra/restart-intent.js")>()),
   prepareGatewayRestartIntentLegacyProcess: async () => undefined,
   clearGatewayRestartIntentSync: () => undefined,
   writeGatewayRestartIntentSync: () => undefined,
